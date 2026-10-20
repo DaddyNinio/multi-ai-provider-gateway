@@ -1,8 +1,5 @@
 <div align="center">
 
-<!-- Replace docs/banner.png with your generated banner (see "Banner" below). -->
-<img src="docs/banner.png" alt="multi-ai-provider-gateway" width="100%" />
-
 # multi-ai-provider-gateway
 
 **One Anthropic/OpenAI-compatible endpoint. Every model from GitHub Copilot and Kiro / Amazon Q.**
@@ -52,7 +49,6 @@ or depend on any third-party gateway server.
 - [Monitoring](#monitoring)
 - [How it is self-contained](#how-it-is-self-contained)
 - [Requirements](#requirements)
-- [Banner](#banner)
 - [Credits](#credits)
 - [License](#license)
 
@@ -223,13 +219,6 @@ containing none of their code.
   `~/.local/share/copilot-api/github_token` (or set `GITHUB_TOKEN`), or use the
   dashboard **Connect** button.
 - **Kiro** auth — logged in via `kiro login` (creates the kiro-cli database).
-
-## Banner
-
-The banner at the top is `docs/banner.png`. To generate one with an AI image
-tool (Midjourney, DALL·E, Stable Diffusion, Ideogram, etc.), use the prompt in
-[`docs/banner-prompt.md`](docs/banner-prompt.md), export at **1280×320** (4:1),
-and save it to `docs/banner.png`.
 
 ## Credits
 

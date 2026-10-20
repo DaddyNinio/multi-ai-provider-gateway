@@ -9,6 +9,12 @@ import { DASHBOARD_HTML } from "./dashboard.js";
 import { extractUsage, record, snapshot } from "./stats.js";
 import * as copilot from "./providers/copilot.js";
 import * as kiro from "./providers/kiro.js";
+import {
+  getCopilotAuthState,
+  markKiroAuthorized,
+  startCopilotAuth,
+  startKiroAuth,
+} from "./auth.js";
 
 export function createApp(cfg: Config): Hono {
   const app = new Hono();
@@ -33,6 +39,29 @@ export function createApp(cfg: Config): Hono {
   app.get("/credits", async (c) => c.json({ providers: await getCredits() }));
   app.get("/dashboard", (c) => c.html(DASHBOARD_HTML));
   app.get("/", (c) => c.redirect("/dashboard"));
+
+  // --- Provider authentication ---
+  app.post("/auth/copilot/start", async (c) => {
+    const state = await startCopilotAuth();
+    return c.json(state);
+  });
+  app.get("/auth/copilot/status", (c) => c.json(getCopilotAuthState()));
+
+  app.post("/auth/kiro/start", (c) => {
+    const state = startKiroAuth();
+    return c.json(state);
+  });
+  app.get("/auth/kiro/status", (c) => {
+    // Check whether kiro credentials are now resolvable.
+    let ok = false;
+    try {
+      kiro.getKiroCredentials();
+      ok = true;
+    } catch {
+      ok = false;
+    }
+    return c.json(markKiroAuthorized(ok));
+  });
 
   // Anthropic Messages API.
   app.post("/v1/messages", (c) => handleMessages(c, cfg));

@@ -35,6 +35,10 @@ export const DASHBOARD_HTML = `<!doctype html>
   .muted { color: #6e7681; }
   .credit-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 12px; }
   a { color: #58a6ff; }
+  .connect-btn { background:#238636; color:#fff; border:none; border-radius:6px;
+                 padding:6px 12px; font-size:13px; cursor:pointer; }
+  .connect-btn:hover { background:#2ea043; }
+  .auth-info { margin-top:8px; font-size:13px; }
 </style>
 </head>
 <body>
@@ -94,17 +98,63 @@ async function tick() {
       </tr>\`).join('') : '<tr><td colspan="8" class="muted">no requests yet</td></tr>';
 
     const ups = c.providers || {};
+    const providerKey = { 'copilot-api': 'copilot', 'kiro-gateway': 'kiro' };
     const keys = Object.keys(ups);
     credits.innerHTML = keys.length ? keys.map(k => {
       const u = ups[k];
-      const body = u.available === false
-        ? '<span class="muted">not reachable / no quota endpoint</span>'
-        : '<pre style="margin:6px 0 0;white-space:pre-wrap;color:#adbac7;font-size:12px">'
-          + (JSON.stringify(u.data, null, 2) || '{}') + '</pre>';
+      const authed = u.available !== false;
+      const pk = providerKey[k] || k;
+      let body;
+      if (authed) {
+        body = '<span class="pill ' + k + '">authenticated</span>';
+      } else {
+        body = '<div class="muted" style="margin-bottom:8px">not authenticated</div>'
+          + '<button data-auth="' + pk + '" class="connect-btn">Connect ' + k + '</button>'
+          + '<div class="auth-info" id="auth-' + pk + '"></div>';
+      }
       return \`<div class="card"><div class="label">\${k}</div>\${body}</div>\`;
-    }).join('') : '<span class="muted">no upstream credit data</span>';
+    }).join('') : '<span class="muted">no provider data</span>';
+
+    // Wire Connect buttons.
+    document.querySelectorAll('.connect-btn').forEach(btn => {
+      btn.addEventListener('click', () => startAuth(btn.getAttribute('data-auth')));
+    });
   } catch (e) {
     uptime.textContent = 'stats fetch failed';
+  }
+}
+
+async function startAuth(provider) {
+  const info = document.getElementById('auth-' + provider);
+  if (info) info.textContent = 'starting…';
+  try {
+    const st = await fetch('/auth/' + provider + '/start', { method: 'POST' }).then(r => r.json());
+    renderAuth(provider, st);
+    // Poll status until authorized or error.
+    const poll = setInterval(async () => {
+      const s = await fetch('/auth/' + provider + '/status').then(r => r.json());
+      renderAuth(provider, s);
+      if (s.status === 'authorized' || s.status === 'error') { clearInterval(poll); setTimeout(tick, 500); }
+    }, 3000);
+  } catch (e) {
+    if (info) info.textContent = 'failed to start auth';
+  }
+}
+
+function renderAuth(provider, s) {
+  const info = document.getElementById('auth-' + provider);
+  if (!info) return;
+  if (s.status === 'pending') {
+    const code = s.userCode && s.userCode !== '—'
+      ? '<div style="margin:6px 0">enter code <b style="font-size:16px;letter-spacing:2px">' + s.userCode + '</b></div>' : '';
+    const uri = /^https?:/.test(s.verificationUri)
+      ? '<a href="' + s.verificationUri + '" target="_blank">' + s.verificationUri + '</a>'
+      : '<span class="muted">' + s.verificationUri + '</span>';
+    info.innerHTML = code + '<div>' + uri + '</div><div class="muted" style="margin-top:4px">waiting for authorization…</div>';
+  } else if (s.status === 'authorized') {
+    info.innerHTML = '<span class="pill kiro">✓ ' + (s.message || 'authorized') + '</span>';
+  } else if (s.status === 'error') {
+    info.innerHTML = '<span class="err">' + (s.message || 'error') + '</span>';
   }
 }
 tick(); setInterval(tick, 4000);

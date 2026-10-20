@@ -40,7 +40,10 @@ export async function getMergedModels(cfg: Config): Promise<ModelEntry[]> {
 
   // Kiro models (static list) — namespaced with the kiro prefix so they are
   // visually distinct from Copilot models in a client's model picker.
-  for (const m of kiro.listModels()) {
+  // Non-Claude Kiro models are exposed under a "claude-"-prefixed display alias
+  // (see kiro.listDisplayModels) so clients that only show Claude-family models
+  // in their picker — e.g. Claude Code's gateway discovery — still list them.
+  for (const m of kiro.listDisplayModels()) {
     merged.push({ id: `${cfg.kiroPrefix}${m.id}`, object: "model", owned_by: "kiro-gateway" });
   }
 
@@ -77,21 +80,26 @@ export interface Route {
 /**
  * Decide which provider handles a requested model id.
  * - "copilot/<id>"            -> copilot (prefix stripped)
- * - "kiro/<id>"               -> kiro (prefix stripped)
+ * - "kiro/<id>"               -> kiro (prefix stripped; display alias resolved)
  * - a known copilot plain id  -> copilot
  * - everything else           -> kiro (bare id; backward compatible)
+ *
+ * For kiro, a requested id may be a "claude-"-prefixed *display alias* of a
+ * non-Claude model (see kiro.listDisplayModels / toRealModelId); we resolve it
+ * back to the real runtime id before handing it to the provider.
  */
 export function pickRoute(cfg: Config, model: string): Route {
   if (model.startsWith(cfg.copilotPrefix)) {
     return { backend: "copilot-api", model: model.slice(cfg.copilotPrefix.length) };
   }
   if (model.startsWith(cfg.kiroPrefix)) {
-    return { backend: "kiro-gateway", model: model.slice(cfg.kiroPrefix.length) };
+    const displayId = model.slice(cfg.kiroPrefix.length);
+    return { backend: "kiro-gateway", model: kiro.toRealModelId(displayId) };
   }
   if (copilotModelIds.has(model)) {
     return { backend: "copilot-api", model };
   }
-  return { backend: "kiro-gateway", model };
+  return { backend: "kiro-gateway", model: kiro.toRealModelId(model) };
 }
 
 /** Probe each provider's basic availability for /health. */

@@ -30,15 +30,19 @@ import { existsSync } from "node:fs";
  * Known Kiro model identifiers (runtime.kiro.dev has no ListAvailableModels
  * endpoint, so the catalog is maintained statically).
  *
- * Kiro serves models from several providers, not just Anthropic:
- *   - Anthropic Claude (Sonnet / Haiku / Opus / Fable)
- *   - OpenAI GPT-5.6 tiers (Sol / Terra / Luna)
- *   - Open-weight MoE models (GLM, DeepSeek, MiniMax, Qwen)
+ * Kiro serves models from several providers, not just Anthropic. The ids below
+ * are the runtime `modelId` strings — not marketing names — in Kiro's lowercase,
+ * dot-versioned convention:
+ *   - Anthropic Claude (Sonnet / Haiku / Opus)
+ *   - Open-weight MoE: GLM
  *
- * Model availability depends on your Kiro tier (free vs. paid). Ids that your
- * account can't access will simply be rejected by the runtime at call time;
- * listing them here is harmless. Ids follow Kiro's own lowercase,
- * dot-versioned naming convention.
+ * Every id here is confirmed to be accepted by the live runtime. Other
+ * open-weight families (deepseek-3.2, minimax-m2.1, minimax-m2.5,
+ * qwen3-coder-next) and OpenAI GPT-5.6 tiers exist in the Kiro IDE/CLI but are
+ * rejected by this streaming runtime endpoint for the current account/tier
+ * (INVALID_MODEL_ID), so they are omitted to keep the picker free of dead
+ * entries. Following the "gateway, not gatekeeper" principle, a bare/unknown id
+ * sent directly is still passed through — the runtime remains the final arbiter.
  */
 export const KIRO_MODELS = [
   // --- Anthropic (Claude) ---
@@ -53,19 +57,9 @@ export const KIRO_MODELS = [
   "claude-opus-4.8",
   "claude-opus-5",
   "claude-opus-5.5",
-  "claude-fable-5.1",
 
-  // --- OpenAI (GPT-5.6 tiers) ---
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-
-  // --- Open-weight MoE models ---
+  // --- Open-weight MoE models (runtime-verified) ---
   "glm-5",
-  "deepseek-v3.2",
-  "minimax-m2.5",
-  "minimax-m2.1",
-  "qwen3-coder-next",
 ] as const;
 
 export type KiroModelId = typeof KIRO_MODELS[number];
@@ -512,6 +506,63 @@ export function listModels(): Array<{ id: string }> {
   return KIRO_MODELS.map(id => ({ id }));
 }
 
+// ============================================================================
+// Display aliasing (client picker compatibility)
+// ============================================================================
+//
+// Some Anthropic-compatible clients (notably Claude Code's gateway model
+// discovery) only surface models in their `/model` picker whose id looks like
+// an Anthropic model, i.e. begins with "claude-". Non-Claude ids we serve
+// (OpenAI GPT-5.6, GLM, DeepSeek, MiniMax, Qwen) are silently filtered out of
+// the picker even though the gateway can route them fine.
+//
+// To make every Kiro model selectable in such pickers, we advertise non-Claude
+// models under a "claude-"-prefixed *display id* (e.g. "gpt-5.6-sol" ->
+// "claude-gpt-5.6-sol"). The display id is what appears in /v1/models; when a
+// request arrives for it we resolve it back to the real runtime id before
+// calling the backend. Real Claude ids are advertised unchanged.
+
+/** Marker prepended to non-Claude ids to make them look Claude-family. */
+const DISPLAY_ALIAS_PREFIX = "claude-";
+
+/** Whether a real runtime id is already an Anthropic (Claude) model. */
+function isClaudeId(realId: string): boolean {
+  return realId.startsWith("claude-");
+}
+
+/** real runtime id -> display id (claude-looking). */
+export function toDisplayModelId(realId: string): string {
+  return isClaudeId(realId) ? realId : `${DISPLAY_ALIAS_PREFIX}${realId}`;
+}
+
+/**
+ * display id -> real runtime id.
+ *
+ * A display id maps back to a real id when it is an aliased non-Claude model.
+ * We only strip the alias prefix when the stripped remainder is a known
+ * non-Claude Kiro model, so genuine Claude ids (which also start with
+ * "claude-") are never mangled.
+ */
+export function toRealModelId(displayId: string): string {
+  if (displayId.startsWith(DISPLAY_ALIAS_PREFIX)) {
+    const stripped = displayId.slice(DISPLAY_ALIAS_PREFIX.length);
+    if ((KIRO_MODELS as readonly string[]).includes(stripped) && !isClaudeId(stripped)) {
+      return stripped;
+    }
+  }
+  return displayId;
+}
+
+/**
+ * List Kiro models using client-friendly *display* ids: non-Claude models are
+ * exposed under a "claude-"-prefixed alias so they appear in clients that only
+ * show Claude-family models in their picker. Use `toRealModelId` to convert a
+ * selected display id back before calling the runtime.
+ */
+export function listDisplayModels(): Array<{ id: string }> {
+  return KIRO_MODELS.map((id) => ({ id: toDisplayModelId(id) }));
+}
+
 /** Kiro credit usage, matching the "Kiro Account" panel in the Kiro app. */
 export interface KiroUsage {
   available: boolean;
@@ -865,6 +916,9 @@ function toAnthropicSse(text: string, toolUses: DecodedToolUse[], model: string)
 
 export default {
   listModels,
+  listDisplayModels,
+  toDisplayModelId,
+  toRealModelId,
   chat,
   getKiroCredentials,
   getKiroUsage,

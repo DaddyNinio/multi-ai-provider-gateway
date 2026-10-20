@@ -9,6 +9,8 @@ export interface Config {
   port: number;
   /** Prefix that namespaces copilot model ids (e.g. "copilot/"). */
   copilotPrefix: string;
+  /** Prefix that namespaces kiro model ids (e.g. "kiro/"). */
+  kiroPrefix: string;
   /** Per-request timeout in milliseconds. */
   requestTimeoutMs: number;
 }
@@ -17,6 +19,7 @@ export function loadConfig(): Config {
   return {
     port: Number(process.env.PORT ?? 9000),
     copilotPrefix: process.env.COPILOT_PREFIX ?? "copilot/",
+    kiroPrefix: process.env.KIRO_PREFIX ?? "kiro/",
     requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS ?? 600000),
   };
 }

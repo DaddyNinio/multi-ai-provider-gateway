@@ -23,9 +23,10 @@ const copilotModelIds = new Set<string>();
 export async function getMergedModels(cfg: Config): Promise<ModelEntry[]> {
   const merged: ModelEntry[] = [];
 
-  // Kiro models (static list) — ids as-is.
+  // Kiro models (static list) — namespaced with the kiro prefix so they are
+  // visually distinct from Copilot models in a client's model picker.
   for (const m of kiro.listModels()) {
-    merged.push({ id: m.id, object: "model", owned_by: "kiro-gateway" });
+    merged.push({ id: `${cfg.kiroPrefix}${m.id}`, object: "model", owned_by: "kiro-gateway" });
   }
 
   // Copilot models (live) — namespaced with the prefix. Failures are tolerated
@@ -54,12 +55,16 @@ export interface Route {
 /**
  * Decide which provider handles a requested model id.
  * - "copilot/<id>"            -> copilot (prefix stripped)
+ * - "kiro/<id>"               -> kiro (prefix stripped)
  * - a known copilot plain id  -> copilot
- * - everything else           -> kiro
+ * - everything else           -> kiro (bare id; backward compatible)
  */
 export function pickRoute(cfg: Config, model: string): Route {
   if (model.startsWith(cfg.copilotPrefix)) {
     return { backend: "copilot-api", model: model.slice(cfg.copilotPrefix.length) };
+  }
+  if (model.startsWith(cfg.kiroPrefix)) {
+    return { backend: "kiro-gateway", model: model.slice(cfg.kiroPrefix.length) };
   }
   if (copilotModelIds.has(model)) {
     return { backend: "copilot-api", model };

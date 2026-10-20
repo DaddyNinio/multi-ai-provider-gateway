@@ -82,6 +82,7 @@ All optional — defaults work out of the box. See `.env.example`.
 | -------------------- | ------------ | -------------------------------------------- |
 | `PORT`               | `9000`       | Port this gateway listens on.                |
 | `COPILOT_PREFIX`     | `copilot/`   | Namespace applied to Copilot model ids.      |
+| `KIRO_PREFIX`        | `kiro/`      | Namespace applied to Kiro model ids.         |
 | `REQUEST_TIMEOUT_MS` | `600000`     | Per-request timeout (ms).                    |
 | `GITHUB_TOKEN`       | *(file)*     | Override the GitHub OAuth token.             |
 
@@ -90,7 +91,7 @@ All optional — defaults work out of the box. See `.env.example`.
 | Method | Path                   | Description                                                      |
 | ------ | ---------------------- | ---------------------------------------------------------------- |
 | `GET`  | `/health`              | Reports which providers are authenticated.                       |
-| `GET`  | `/v1/models`           | Merged catalog. Kiro ids as-is; Copilot ids prefixed.            |
+| `GET`  | `/v1/models`           | Merged catalog. Kiro ids prefixed `kiro/`; Copilot ids `copilot/`. |
 | `POST` | `/v1/messages`         | Anthropic Messages API. Routed by `model`.                       |
 | `POST` | `/v1/chat/completions` | OpenAI Chat Completions API. Routed by `model`.                  |
 | `GET`  | `/dashboard`           | Live credits &amp; token-usage monitor (HTML). Also at `/`.      |
@@ -102,8 +103,12 @@ All optional — defaults work out of the box. See `.env.example`.
 For a request's `model`:
 
 1. starts with `COPILOT_PREFIX` (e.g. `copilot/gpt-4o`) → **Copilot** (prefix stripped)
-2. a bare id that exists only in the Copilot catalog → **Copilot**
-3. everything else → **Kiro**
+2. starts with `KIRO_PREFIX` (e.g. `kiro/claude-opus-5`) → **Kiro** (prefix stripped)
+3. a bare id that exists only in the Copilot catalog → **Copilot**
+4. everything else → **Kiro** (bare ids still work, for backward compatibility)
+
+So in a client's model picker you can tell them apart at a glance:
+`kiro/claude-opus-5`, `kiro/glm-5` vs `copilot/gpt-4o`, `copilot/claude-sonnet-4`.
 
 Cross-protocol calls are translated automatically (Anthropic↔OpenAI), so a
 Copilot model works through `/v1/messages` and a Kiro model works through

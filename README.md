@@ -76,6 +76,21 @@ All configuration is via environment variables (or a `.env` file). Defaults:
 | `GET`  | `/v1/models`           | Merged catalog. Kiro ids as-is; copilot ids prefixed.            |
 | `POST` | `/v1/messages`         | Anthropic Messages API. Routed by `model`. Streaming supported.  |
 | `POST` | `/v1/chat/completions` | OpenAI Chat Completions API. Routed by `model`. Streaming too.   |
+| `GET`  | `/dashboard`           | Live credits &amp; token-usage monitoring page (HTML). Also at `/`. |
+| `GET`  | `/stats`               | JSON token-usage stats accumulated by this gateway.              |
+| `GET`  | `/credits`             | Best-effort credit/quota info pulled from the upstreams.         |
+
+### Monitoring
+
+Open [http://localhost:9000/dashboard](http://localhost:9000/dashboard) in a
+browser for a live view (auto-refreshes every 4s) of:
+
+- total and per-model request counts, errors, and input/output token totals,
+  tracked in-memory by this gateway for the current session;
+- credit/quota info from upstreams that expose it (e.g. copilot-api's `/usage`).
+
+Stats reset when the gateway restarts — it is a live monitor, not a persistent
+ledger.
 
 ### Routing rules
 

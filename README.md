@@ -163,6 +163,7 @@ ANTHROPIC_BASE_URL=http://localhost:9000 ANTHROPIC_AUTH_TOKEN=any-value claude
 | Flag                 | Description                                                    |
 | -------------------- | ------------------------------------------------------------- |
 | `--login [provider]` | Sign in to a provider from the terminal: `copilot`, `kiro`, or `all` (default). |
+| `--model [id]`       | Pick the active Claude Code model from the **full** catalog (interactive), or set `<id>` directly (e.g. `kiro/glm-5`), then exit. |
 | `--setup-claude`     | Configure Claude Code to use this gateway, then exit.         |
 | `--port, -p <n>`     | Port to listen on (default `9000`, or `$PORT`).               |
 | `--token <value>`    | Auth token to write during setup (default: random, URL-safe). |

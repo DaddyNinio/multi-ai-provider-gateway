@@ -11,6 +11,7 @@ import { createApp } from "./server.js";
 import { health } from "./upstreams.js";
 import { setupClaude, describeSetup } from "./claude-setup.js";
 import { login } from "./cli-auth.js";
+import { pickModel } from "./model-picker.js";
 import { box, c, statusGlyph } from "./ui.js";
 
 /** Minimal .env loader (no dependency): KEY=VALUE lines, # comments. */
@@ -45,6 +46,8 @@ interface CliArgs {
   yes: boolean;
   /** Provider login target: "copilot" | "kiro" | "all"; undefined = not requested. */
   login?: "copilot" | "kiro" | "all";
+  /** Model picker: true = interactive; string = set that id directly; undefined = not requested. */
+  model?: string | boolean;
   port?: number;
   token?: string;
 }
@@ -92,11 +95,24 @@ function parseArgs(argv: string[]): CliArgs {
         }
         break;
       }
+      case "--model":
+      case "--pick-model":
+      case "--select-model": {
+        const next = argv[i + 1];
+        if (next && !next.startsWith("-")) {
+          i++;
+          args.model = next;
+        } else {
+          args.model = true; // interactive picker
+        }
+        break;
+      }
       default:
         if (a.startsWith("--port=")) args.port = Number(a.slice("--port=".length));
         else if (a.startsWith("--token=")) args.token = a.slice("--token=".length);
         else if (a.startsWith("--login=")) args.login = normalizeLoginTarget(a.slice("--login=".length));
         else if (a.startsWith("--connect=")) args.login = normalizeLoginTarget(a.slice("--connect=".length));
+        else if (a.startsWith("--model=")) args.model = a.slice("--model=".length);
     }
   }
   return args;
@@ -120,6 +136,7 @@ function printHelp(): void {
     "",
     c.bold("OPTIONS"),
     `  ${c.cyan("--login [provider]")}   Sign in to a provider: copilot | kiro | all (default all), then exit`,
+    `  ${c.cyan("--model [id]")}         Pick the active Claude Code model (interactive), or set <id> directly, then exit`,
     `  ${c.cyan("--setup-claude")}       Configure Claude Code to use this gateway, then exit`,
     `  ${c.cyan("--port, -p <n>")}       Port to listen on (default 9000, or $PORT)`,
     `  ${c.cyan("--token <value>")}      Auth token to write during setup (default: random)`,
@@ -130,6 +147,12 @@ function printHelp(): void {
     c.bold("EXAMPLES"),
     `  ${c.gray("# Start the server (prompts to configure Claude Code the first time)")}`,
     `  multi-ai-provider-gateway`,
+    "",
+    `  ${c.gray("# Pick the active model from the FULL catalog (incl. non-Anthropic)")}`,
+    `  multi-ai-provider-gateway --model`,
+    "",
+    `  ${c.gray("# Set a non-Anthropic model directly, no prompt")}`,
+    `  multi-ai-provider-gateway --model kiro/glm-5`,
     "",
     `  ${c.gray("# Sign in to GitHub Copilot from the terminal")}`,
     `  multi-ai-provider-gateway --login copilot`,
@@ -235,6 +258,14 @@ async function main(): Promise<void> {
   if (args.login) {
     const ok = await login(args.login);
     process.exitCode = ok ? 0 : 1;
+    return;
+  }
+
+  // Model-picker mode: choose (or directly set) the active Claude Code model
+  // from the full merged catalog — including non-Anthropic models — then exit.
+  if (args.model !== undefined) {
+    const preset = typeof args.model === "string" ? args.model : undefined;
+    await pickModel(cfg, preset);
     return;
   }
 

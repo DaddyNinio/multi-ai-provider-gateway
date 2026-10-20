@@ -122,3 +122,71 @@ export function describeSetup(r: SetupResult): string {
   lines.push(`${c.gray("Next:")} run ${c.bold("claude")} and type ${c.bold("/models")}.`);
   return lines.join("\n");
 }
+
+export interface SetModelResult {
+  settingsPath: string;
+  backupPath: string | null;
+  model: string;
+  /** The model previously set (if any), for display. */
+  previous: string | null;
+  created: boolean;
+}
+
+/**
+ * Set Claude Code's active model in ~/.claude/settings.json.
+ *
+ * This writes the top-level `"model"` key, which Claude Code uses directly —
+ * bypassing the `/model` picker (whose gateway-discovery list only surfaces
+ * ids beginning with "claude-"). That lets you select ANY gateway model,
+ * including non-Anthropic ones, e.g. `kiro/glm-5` or `copilot/gpt-4o`.
+ *
+ * The file is MERGED (all other keys preserved) and a timestamped backup is
+ * written first, so the change is reversible.
+ */
+export function setClaudeModel(model: string): SetModelResult {
+  const trimmed = model.trim();
+  if (!trimmed) throw new Error("model id must not be empty");
+
+  mkdirSync(dirname(SETTINGS_PATH), { recursive: true });
+  const { data, existed } = readSettings();
+
+  let backupPath: string | null = null;
+  if (existed) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    backupPath = `${SETTINGS_PATH}.bak.${stamp}`;
+    copyFileSync(SETTINGS_PATH, backupPath);
+  }
+
+  const previous = typeof data.model === "string" ? data.model : null;
+  data.model = trimmed;
+
+  writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2) + "\n", "utf8");
+
+  return {
+    settingsPath: SETTINGS_PATH,
+    backupPath,
+    model: trimmed,
+    previous,
+    created: !existed,
+  };
+}
+
+/** Human-friendly summary printed after setting the active model. */
+export function describeSetModel(r: SetModelResult): string {
+  const lines: string[] = [];
+  lines.push(`${c.green("✓")} ${c.bold("Active model updated.")}`);
+  lines.push("");
+  lines.push(`${c.gray("model   ")}  ${c.brightCyan(r.model)}`);
+  if (r.previous && r.previous !== r.model) {
+    lines.push(`${c.gray("previous")}  ${c.dim(r.previous)}`);
+  }
+  lines.push(
+    `${c.gray("settings")}  ${r.settingsPath}${r.created ? c.gray(" (created)") : ""}`,
+  );
+  if (r.backupPath) lines.push(`${c.gray("backup  ")}  ${r.backupPath}`);
+  lines.push("");
+  lines.push(
+    `${c.gray("Next:")} restart ${c.bold("claude")} — it will use ${c.bold(r.model)}.`,
+  );
+  return lines.join("\n");
+}

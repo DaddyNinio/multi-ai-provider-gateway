@@ -60,6 +60,17 @@ export interface AnthropicMessagesRequest {
   temperature?: number;
   top_p?: number;
   stop_sequences?: string[];
+  /** Tool definitions the model may call. */
+  tools?: AnthropicTool[];
+  /** Tool-choice directive (passed through; not all are honored by Kiro). */
+  tool_choice?: unknown;
+}
+
+/** Anthropic tool definition. */
+export interface AnthropicTool {
+  name: string;
+  description?: string;
+  input_schema?: Record<string, unknown>;
 }
 
 /** Kiro authentication credentials extracted from SQLite DB. */
@@ -69,24 +80,55 @@ interface KiroCredentials {
   region: string;
 }
 
+/** CodeWhisperer tool specification. */
+interface KiroToolSpec {
+  toolSpecification: {
+    name: string;
+    description?: string;
+    inputSchema: { json: Record<string, unknown> };
+  };
+}
+
+/** CodeWhisperer tool result (sent back on the next user turn). */
+interface KiroToolResult {
+  toolUseId: string;
+  content: Array<{ text?: string; json?: unknown }>;
+  status: "success" | "error";
+}
+
+/** CodeWhisperer tool use (emitted by the assistant; echoed in history). */
+interface KiroToolUse {
+  toolUseId: string;
+  name: string;
+  input: unknown;
+}
+
+interface KiroUserInputMessage {
+  content: string;
+  modelId: string;
+  origin: "AI_EDITOR";
+  userInputMessageContext?: {
+    tools?: KiroToolSpec[];
+    toolResults?: KiroToolResult[];
+  };
+}
+
+interface KiroAssistantMessage {
+  content: string;
+  toolUses?: KiroToolUse[];
+}
+
 /** Kiro runtime API request body structure (GenerateAssistantResponse). */
 interface KiroRequestBody {
   conversationState: {
     chatTriggerType: "MANUAL";
     conversationId: string;
     currentMessage: {
-      userInputMessage: {
-        content: string;
-        modelId: string;
-        origin: "AI_EDITOR";
-        userInputMessageContext?: {
-          tools?: unknown[];
-        };
-      };
+      userInputMessage: KiroUserInputMessage;
     };
     history?: Array<
-      | { userInputMessage: { content: string; modelId: string; origin: "AI_EDITOR" } }
-      | { assistantResponseMessage: { content: string } }
+      | { userInputMessage: KiroUserInputMessage }
+      | { assistantResponseMessage: KiroAssistantMessage }
     >;
   };
   profileArn: string;
@@ -252,120 +294,165 @@ function extractTextContent(content: AnthropicMessage["content"]): string {
   if (typeof content === "string") {
     return content;
   }
-  
   if (Array.isArray(content)) {
     return content
-      .filter(block => block.type === "text")
-      .map(block => block.text || "")
+      .filter((block) => block.type === "text")
+      .map((block) => block.text || "")
       .join("");
   }
-  
   return "";
 }
 
+/** Extract Anthropic `tool_use` blocks from an assistant message's content. */
+function extractToolUses(content: AnthropicMessage["content"]): KiroToolUse[] {
+  if (!Array.isArray(content)) return [];
+  const out: KiroToolUse[] = [];
+  for (const block of content as any[]) {
+    if (block?.type === "tool_use") {
+      out.push({
+        toolUseId: String(block.id ?? crypto.randomUUID()),
+        name: String(block.name ?? ""),
+        input: block.input ?? {},
+      });
+    }
+  }
+  return out;
+}
+
+/** Extract Anthropic `tool_result` blocks from a user message's content. */
+function extractToolResults(content: AnthropicMessage["content"]): KiroToolResult[] {
+  if (!Array.isArray(content)) return [];
+  const out: KiroToolResult[] = [];
+  for (const block of content as any[]) {
+    if (block?.type === "tool_result") {
+      // tool_result.content may be a string or an array of blocks.
+      const resultContent: Array<{ text?: string; json?: unknown }> = [];
+      const rc = block.content;
+      if (typeof rc === "string") {
+        resultContent.push({ text: rc });
+      } else if (Array.isArray(rc)) {
+        for (const c of rc) {
+          if (typeof c === "string") resultContent.push({ text: c });
+          else if (c?.type === "text") resultContent.push({ text: String(c.text ?? "") });
+          else if (c?.type === "json" || c?.json !== undefined) resultContent.push({ json: c.json ?? c });
+          else resultContent.push({ text: JSON.stringify(c) });
+        }
+      } else if (rc !== undefined) {
+        resultContent.push({ text: JSON.stringify(rc) });
+      }
+      if (resultContent.length === 0) resultContent.push({ text: "" });
+      out.push({
+        toolUseId: String(block.tool_use_id ?? ""),
+        content: resultContent,
+        status: block.is_error ? "error" : "success",
+      });
+    }
+  }
+  return out;
+}
+
+/** Translate Anthropic tool definitions into CodeWhisperer tool specs. */
+function convertTools(tools?: AnthropicTool[]): KiroToolSpec[] | undefined {
+  if (!tools || tools.length === 0) return undefined;
+  return tools.map((t) => ({
+    toolSpecification: {
+      name: t.name,
+      description: t.description,
+      inputSchema: { json: t.input_schema ?? { type: "object", properties: {} } },
+    },
+  }));
+}
+
+/** Build a Kiro userInputMessage from an Anthropic user message. */
+function buildUserMessage(
+  msg: AnthropicMessage,
+  model: string,
+  opts: { tools?: KiroToolSpec[]; systemPrefix?: string } = {},
+): KiroUserInputMessage {
+  const toolResults = extractToolResults(msg.content);
+  let text = extractTextContent(msg.content);
+  if (opts.systemPrefix) text = `${opts.systemPrefix}\n\n${text}`.trim();
+
+  const context: KiroUserInputMessage["userInputMessageContext"] = {};
+  if (opts.tools && opts.tools.length) context.tools = opts.tools;
+  if (toolResults.length) context.toolResults = toolResults;
+
+  // When a turn carries only tool results (no text), Kiro still needs a
+  // non-empty content string; a single space avoids the "fake continue" and
+  // empty-content 400 issues seen in other translators.
+  const content = text || (toolResults.length ? " " : "(empty placeholder)");
+
+  const out: KiroUserInputMessage = { content, modelId: model, origin: "AI_EDITOR" };
+  if (Object.keys(context).length) out.userInputMessageContext = context;
+  return out;
+}
+
+/** Build a Kiro assistantResponseMessage from an Anthropic assistant message. */
+function buildAssistantMessage(msg: AnthropicMessage): KiroAssistantMessage {
+  const text = extractTextContent(msg.content);
+  const toolUses = extractToolUses(msg.content);
+  const out: KiroAssistantMessage = {
+    // assistant content may legitimately be empty when it only emits tool_use.
+    content: text || (toolUses.length ? "" : "(empty placeholder)"),
+  };
+  if (toolUses.length) out.toolUses = toolUses;
+  return out;
+}
+
 /**
- * Convert Anthropic Messages API payload to Kiro runtime request body.
- * 
- * Kiro API structure (from converters_core.py analysis):
- * - conversationState.currentMessage.userInputMessage: the current user message
- * - conversationState.history: alternating userInputMessage and assistantResponseMessage
- * - conversationState.conversationId: stable ID based on message hash (using UUID for simplicity)
- * - profileArn: AWS CodeWhisperer profile ARN
- * 
- * Simplifications for this initial implementation:
- * - Tools are not yet supported (would go in userInputMessageContext.tools)
- * - Images are not yet supported (would go in userInputMessage.images)
- * - System prompt is prepended to first user message (matches Python implementation)
- * 
- * @param payload - Anthropic Messages API request
- * @param credentials - Kiro credentials
- * @returns Kiro runtime request body
+ * Convert Anthropic Messages API payload to a Kiro runtime request body,
+ * including full tool support:
+ * - `tools` -> currentMessage.userInputMessageContext.tools
+ * - assistant `tool_use` blocks -> history assistantResponseMessage.toolUses
+ * - user `tool_result` blocks -> userInputMessageContext.toolResults
+ *
+ * The system prompt is prepended to the first user message (CodeWhisperer has
+ * no dedicated system field on this endpoint).
  */
 function convertAnthropicToKiro(
   payload: AnthropicMessagesRequest,
-  credentials: KiroCredentials
+  credentials: KiroCredentials,
 ): KiroRequestBody {
   const { messages, system, model } = payload;
-  
-  // Generate conversation ID (could be made stable based on message hash)
   const conversationId = crypto.randomUUID();
-  
-  // Build history (all messages except the last one)
-  const history: KiroRequestBody["conversationState"]["history"] = [];
+  const tools = convertTools(payload.tools);
+
+  const history: NonNullable<KiroRequestBody["conversationState"]["history"]> = [];
   const historyMessages = messages.slice(0, -1);
-  
-  // If we have a system prompt, prepend it to the first user message
   let systemPrepended = false;
-  
-  for (let i = 0; i < historyMessages.length; i++) {
-    const msg = historyMessages[i];
-    const content = extractTextContent(msg.content);
-    
+
+  for (const msg of historyMessages) {
     if (msg.role === "user") {
-      let userContent = content;
-      
-      // Prepend system prompt to the first user message
-      if (!systemPrepended && system) {
-        userContent = `${system}\n\n${content}`;
-        systemPrepended = true;
-      }
-      
-      history.push({
-        userInputMessage: {
-          content: userContent || "(empty placeholder)",
-          modelId: model,
-          origin: "AI_EDITOR",
-        },
-      });
-    } else if (msg.role === "assistant") {
-      history.push({
-        assistantResponseMessage: {
-          content: content || "(empty placeholder)",
-        },
-      });
+      const prefix = !systemPrepended && system ? system : undefined;
+      if (prefix) systemPrepended = true;
+      history.push({ userInputMessage: buildUserMessage(msg, model, { systemPrefix: prefix }) });
+    } else {
+      history.push({ assistantResponseMessage: buildAssistantMessage(msg) });
     }
   }
-  
-  // Current message (the last one)
+
   const currentMsg = messages[messages.length - 1];
-  let currentContent = extractTextContent(currentMsg.content);
-  
-  // If the current message is assistant, we need to add it to history and create a placeholder user message
+  let currentUserMessage: KiroUserInputMessage;
+
   if (currentMsg.role === "assistant") {
-    history.push({
-      assistantResponseMessage: {
-        content: currentContent || "(empty placeholder)",
-      },
-    });
-    currentContent = "(empty placeholder)";
+    // Rare: last message is the assistant's. Put it in history, send a filler.
+    history.push({ assistantResponseMessage: buildAssistantMessage(currentMsg) });
+    currentUserMessage = { content: " ", modelId: model, origin: "AI_EDITOR" };
+    if (tools) currentUserMessage.userInputMessageContext = { tools };
   } else {
-    // Prepend system prompt to current message if not yet prepended and history is empty
-    if (!systemPrepended && system) {
-      currentContent = `${system}\n\n${currentContent}`;
-    }
+    const prefix = !systemPrepended && system ? system : undefined;
+    currentUserMessage = buildUserMessage(currentMsg, model, { tools, systemPrefix: prefix });
   }
-  
-  // Build the request body
+
   const body: KiroRequestBody = {
     conversationState: {
       chatTriggerType: "MANUAL",
       conversationId,
-      currentMessage: {
-        userInputMessage: {
-          content: currentContent || "(empty placeholder)",
-          modelId: model,
-          origin: "AI_EDITOR",
-        },
-      },
+      currentMessage: { userInputMessage: currentUserMessage },
     },
     profileArn: credentials.profileArn,
   };
-  
-  // Add history if not empty
-  if (history.length > 0) {
-    body.conversationState.history = history;
-  }
-  
+  if (history.length > 0) body.conversationState.history = history;
   return body;
 }
 
@@ -455,96 +542,200 @@ export async function chat(
 
   // The runtime responds with an AWS vnd.amazon.eventstream body (binary,
   // length-prefixed frames whose payloads carry JSON). We decode the full
-  // body, extract the assistant text, and return it in Anthropic shape.
+  // body, extract the assistant text and any tool uses, and return Anthropic shape.
   const raw = new Uint8Array(await response.arrayBuffer());
-  const text = decodeKiroEventStream(raw);
+  const decoded = decodeKiroEventStream(raw);
+  const { text, toolUses } = decoded;
 
   if (payload.stream) {
-    // Re-emit as a minimal Anthropic SSE stream so clients that asked for
-    // streaming still get the expected event sequence.
-    return new Response(toAnthropicSse(text, payload.model), {
+    // Re-emit as an Anthropic SSE stream so streaming clients get the expected
+    // event sequence, including tool_use blocks.
+    return new Response(toAnthropicSse(text, toolUses, payload.model), {
       status: 200,
       headers: { "content-type": "text/event-stream" },
     });
   }
+
+  // Assemble Anthropic content blocks: text first (if any), then tool_use.
+  const content: any[] = [];
+  if (text) content.push({ type: "text", text });
+  for (const tu of toolUses) {
+    content.push({ type: "tool_use", id: tu.toolUseId, name: tu.name, input: tu.input });
+  }
+  if (content.length === 0) content.push({ type: "text", text: "" });
 
   return {
     id: `msg_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`,
     type: "message",
     role: "assistant",
     model: payload.model,
-    content: [{ type: "text", text }],
-    stop_reason: "end_turn",
+    content,
+    stop_reason: toolUses.length ? "tool_use" : "end_turn",
     stop_sequence: null,
     usage: { input_tokens: 0, output_tokens: 0 },
   };
 }
 
+/** A fully-assembled tool use decoded from the event stream. */
+export interface DecodedToolUse {
+  toolUseId: string;
+  name: string;
+  input: unknown;
+}
+
+/** Result of decoding a Kiro event-stream response. */
+export interface DecodedKiroResponse {
+  text: string;
+  toolUses: DecodedToolUse[];
+}
+
 /**
- * Decode an AWS event-stream (vnd.amazon.eventstream) response body and
- * concatenate the assistant text it carries.
+ * Decode an AWS event-stream (vnd.amazon.eventstream) response body into the
+ * assistant text and any tool uses it carries.
  *
  * Rather than fully parsing the binary frame CRCs, we decode the bytes and
- * extract the JSON event payloads embedded in the stream. Each content event
- * looks like {"content":"..."}; assistantResponseEvent chunks are concatenated
- * in order. This is resilient to the exact framing and is how the text is
- * reconstructed for a non-streaming reply.
+ * extract the embedded JSON event payloads:
+ * - assistantResponseEvent chunks: {"content":"..."} — concatenated in order.
+ * - toolUseEvent chunks: {"toolUseId":"…","name":"…","input":"<json-chunk>","stop":bool}
+ *   The `input` arrives as partial JSON string fragments that we accumulate per
+ *   toolUseId and parse once complete.
  */
-export function decodeKiroEventStream(bytes: Uint8Array): string {
+export function decodeKiroEventStream(bytes: Uint8Array): DecodedKiroResponse {
   const decoder = new TextDecoder("utf-8", { fatal: false });
   const asText = decoder.decode(bytes);
 
-  let out = "";
-  // Match "content":"..." allowing escaped quotes inside the value.
-  const re = /"content"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(asText)) !== null) {
+  // --- Assistant text: match "content":"..." allowing escaped quotes. ---
+  // Guard against accidentally matching tool_result "content" by only taking
+  // content fields that are NOT part of a toolUse frame. We scan linearly.
+  let text = "";
+  const contentRe = /"content"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+  let cm: RegExpExecArray | null;
+  while ((cm = contentRe.exec(asText)) !== null) {
     try {
-      // Unescape JSON string escapes by wrapping and parsing.
-      out += JSON.parse(`"${m[1]}"`);
+      text += JSON.parse(`"${cm[1]}"`);
     } catch {
-      out += m[1];
+      text += cm[1];
     }
   }
-  return out;
+
+  // --- Tool uses: accumulate input fragments per toolUseId. ---
+  const order: string[] = [];
+  const acc = new Map<string, { name: string; inputStr: string }>();
+
+  // Match each toolUse frame's fields. Frames may contain any subset of
+  // toolUseId/name/input, so we capture them with individual scans anchored on
+  // toolUseId occurrences.
+  const idRe = /"toolUseId"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+  let im: RegExpExecArray | null;
+  while ((im = idRe.exec(asText)) !== null) {
+    const id = safeJsonStr(im[1]);
+    if (!acc.has(id)) {
+      acc.set(id, { name: "", inputStr: "" });
+      order.push(id);
+    }
+    // Look ahead in a small window after this toolUseId for name/input.
+    const window = asText.slice(im.index, im.index + 4000);
+    const nameM = /"name"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(window);
+    if (nameM) {
+      const nm = safeJsonStr(nameM[1]);
+      if (nm) acc.get(id)!.name = nm;
+    }
+    const inputM = /"input"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(window);
+    if (inputM) acc.get(id)!.inputStr += safeJsonStr(inputM[1]);
+  }
+
+  const toolUses: DecodedToolUse[] = order.map((id) => {
+    const entry = acc.get(id)!;
+    let input: unknown = {};
+    const s = entry.inputStr.trim();
+    if (s) {
+      try {
+        input = JSON.parse(s);
+      } catch {
+        input = { _raw: s };
+      }
+    }
+    return { toolUseId: id, name: entry.name, input };
+  });
+
+  return { text, toolUses };
 }
 
-/** Build a minimal Anthropic Messages SSE stream for a complete text. */
-function toAnthropicSse(text: string, model: string): string {
+/** Parse a JSON string body ("..." contents) safely, falling back to raw. */
+function safeJsonStr(inner: string): string {
+  try {
+    return JSON.parse(`"${inner}"`);
+  } catch {
+    return inner;
+  }
+}
+
+/**
+ * Build an Anthropic Messages SSE stream for a complete text + tool uses.
+ * Emits text as content block 0 (when present), then one tool_use block per
+ * decoded tool use, with the correct stop_reason.
+ */
+function toAnthropicSse(text: string, toolUses: DecodedToolUse[], model: string): string {
   const id = `msg_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
   const ev = (event: string, data: unknown) =>
     `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  return (
-    ev("message_start", {
-      type: "message_start",
-      message: {
-        id,
-        type: "message",
-        role: "assistant",
-        model,
-        content: [],
-        stop_reason: null,
-        usage: { input_tokens: 0, output_tokens: 0 },
-      },
-    }) +
-    ev("content_block_start", {
-      type: "content_block_start",
-      index: 0,
-      content_block: { type: "text", text: "" },
-    }) +
-    ev("content_block_delta", {
-      type: "content_block_delta",
-      index: 0,
-      delta: { type: "text_delta", text },
-    }) +
-    ev("content_block_stop", { type: "content_block_stop", index: 0 }) +
+
+  let out = ev("message_start", {
+    type: "message_start",
+    message: {
+      id,
+      type: "message",
+      role: "assistant",
+      model,
+      content: [],
+      stop_reason: null,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+  });
+
+  let index = 0;
+  if (text || toolUses.length === 0) {
+    out +=
+      ev("content_block_start", {
+        type: "content_block_start",
+        index,
+        content_block: { type: "text", text: "" },
+      }) +
+      ev("content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: { type: "text_delta", text },
+      }) +
+      ev("content_block_stop", { type: "content_block_stop", index });
+    index++;
+  }
+
+  for (const tu of toolUses) {
+    const inputJson = JSON.stringify(tu.input ?? {});
+    out +=
+      ev("content_block_start", {
+        type: "content_block_start",
+        index,
+        content_block: { type: "tool_use", id: tu.toolUseId, name: tu.name, input: {} },
+      }) +
+      ev("content_block_delta", {
+        type: "content_block_delta",
+        index,
+        delta: { type: "input_json_delta", partial_json: inputJson },
+      }) +
+      ev("content_block_stop", { type: "content_block_stop", index });
+    index++;
+  }
+
+  out +=
     ev("message_delta", {
       type: "message_delta",
-      delta: { stop_reason: "end_turn" },
+      delta: { stop_reason: toolUses.length ? "tool_use" : "end_turn" },
       usage: { output_tokens: 0 },
     }) +
-    ev("message_stop", { type: "message_stop" })
-  );
+    ev("message_stop", { type: "message_stop" });
+
+  return out;
 }
 
 // ============================================================================

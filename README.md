@@ -1,16 +1,30 @@
+<div align="center">
+
+<!-- Replace docs/banner.png with your generated banner (see "Banner" below). -->
+<img src="docs/banner.png" alt="multi-ai-provider-gateway" width="100%" />
+
 # multi-ai-provider-gateway
 
-A single **Anthropic/OpenAI-compatible** gateway that exposes the models of two
-providers behind one endpoint — with **all code original and self-contained**.
-It talks **directly** to each provider's real backend; it does not run, embed,
+**One Anthropic/OpenAI-compatible endpoint. Every model from GitHub Copilot and Kiro / Amazon Q.**
+
+[![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Self-contained](https://img.shields.io/badge/deps-no%20external%20gateway-7ee787)](#how-it-is-self-contained)
+
+</div>
+
+---
+
+Point **Claude Code** — or any Anthropic/OpenAI client — at one local server and
+get the **union of both providers' model catalogs** in a single `/v1/models`
+list, each request routed to the right backend by model name, with a live
+token &amp; credits dashboard. All code here is **original and self-contained**:
+it talks **directly** to each provider's real backend and does not run, embed,
 or depend on any third-party gateway server.
 
-- **Kiro / Amazon Q** — Claude and GLM models via `runtime.kiro.dev`
-- **GitHub Copilot** — the full Copilot model catalog via `api.githubcopilot.com`
-
-Point Claude Code (or any Anthropic/OpenAI client) at this one server and you
-get the union of both providers' models in a single `/v1/models` list, routed to
-the right backend by model name, plus a live token/credits dashboard.
+- **Kiro / Amazon Q** — Claude &amp; GLM models via `runtime.kiro.dev`
+- **GitHub Copilot** — the full Copilot catalog via `api.githubcopilot.com`
 
 ```
                        ┌───────────────────────────────┐
@@ -18,18 +32,176 @@ the right backend by model name, plus a live token/credits dashboard.
   (or any client)      │  /v1/models                    │
                        │  /v1/messages                  │
                        │  /v1/chat/completions          │
-                       │  /dashboard  /stats            │
+                       │  /dashboard  /stats  /credits  │
                        └──────┬───────────────┬─────────┘
-             kiro model id    │               │   copilot/<id> or known copilot id
+            kiro/<id>         │               │   copilot/<id>
                               ▼               ▼
           runtime.kiro.dev (direct)   api.githubcopilot.com (direct)
           [src/providers/kiro.ts]     [src/providers/copilot.ts]
 ```
 
+## Contents
+
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Use with Claude Code](#use-with-claude-code)
+- [CLI options](#cli-options)
+- [Configuration](#configuration)
+- [Endpoints](#endpoints)
+- [Routing rules](#routing-rules)
+- [Monitoring](#monitoring)
+- [How it is self-contained](#how-it-is-self-contained)
+- [Requirements](#requirements)
+- [Banner](#banner)
+- [Credits](#credits)
+- [License](#license)
+
+## Features
+
+- 🔀 **One endpoint, two providers** — merged `/v1/models`, routed by model name.
+- 🏷️ **Namespaced models** — `kiro/...` vs `copilot/...` so you can tell them
+  apart at a glance in any model picker.
+- 🔁 **Protocol translation** — Anthropic ⇄ OpenAI both ways, so a Copilot model
+  works through `/v1/messages` and a Kiro model through `/v1/chat/completions`.
+- ⚡ **One-command Claude Code setup** — safely writes `~/.claude/settings.json`
+  (merges + backs up first).
+- 🔐 **Built-in auth** — GitHub Copilot device-code login from the dashboard;
+  Kiro login launcher.
+- 📊 **Live dashboard** — per-provider and per-model requests, errors, and
+  input/output token totals, plus credits/quota.
+- 📦 **Zero external gateway** — original TypeScript, talks straight to each
+  backend. Run it with `npx`, no clone required.
+
+## Quick start
+
+```bash
+npm install
+npm start
+# opens on http://localhost:9000  ·  dashboard at /dashboard
+# on first run it offers to configure Claude Code for you
+```
+
+Run it straight from GitHub with no clone:
+
+```bash
+npx github:DaddyNinio/multi-ai-provider-gateway
+```
+
+Compiled build:
+
+```bash
+npm run build && npm run serve
+```
+
+You can run with just one provider authenticated — the gateway serves whatever
+is available.
+
+## Use with Claude Code
+
+The easiest path is to let the gateway configure Claude Code for you. It writes
+`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and
+`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` into `~/.claude/settings.json`,
+**merging** with your existing settings and saving a timestamped backup first,
+so the change is always reversible.
+
+```bash
+# One-shot: configure Claude Code, then exit
+npm run setup-claude
+# or
+multi-ai-provider-gateway --setup-claude
+```
+
+Just starting the server also **offers to configure Claude Code** interactively
+the first time:
+
+```bash
+npm start
+# ◆ multi-ai-provider-gateway  http://localhost:9000
+# Configure Claude Code to use this gateway now? [Y/n]
+```
+
+Then run Claude Code and pick any model from either provider:
+
+```bash
+claude
+# then type: /models  →  kiro/claude-opus-5, kiro/glm-5, copilot/gpt-4o, …
+```
+
+Prefer to set it yourself? Point Claude Code at the gateway manually:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:9000 ANTHROPIC_AUTH_TOKEN=any-value claude
+```
+
+## CLI options
+
+| Flag                 | Description                                                    |
+| -------------------- | ------------------------------------------------------------- |
+| `--setup-claude`     | Configure Claude Code to use this gateway, then exit.         |
+| `--port, -p <n>`     | Port to listen on (default `9000`, or `$PORT`).               |
+| `--token <value>`    | Auth token to write during setup (default: random, URL-safe). |
+| `--no-setup-prompt`  | Skip the interactive "configure Claude Code?" prompt.         |
+| `--yes, -y`          | Assume "yes" to prompts (non-interactive setup).              |
+| `--help, -h`         | Show help.                                                    |
+
+## Configuration
+
+All optional — defaults work out of the box. See [`.env.example`](.env.example).
+
+| Variable             | Default    | Description                             |
+| -------------------- | ---------- | --------------------------------------- |
+| `PORT`               | `9000`     | Port this gateway listens on.           |
+| `COPILOT_PREFIX`     | `copilot/` | Namespace applied to Copilot model ids. |
+| `KIRO_PREFIX`        | `kiro/`    | Namespace applied to Kiro model ids.    |
+| `REQUEST_TIMEOUT_MS` | `600000`   | Per-request timeout (ms).               |
+| `GITHUB_TOKEN`       | *(file)*   | Override the GitHub OAuth token.        |
+
+## Endpoints
+
+| Method | Path                   | Description                                                        |
+| ------ | ---------------------- | ----------------------------------------------------------------- |
+| `GET`  | `/health`              | Reports which providers are authenticated.                        |
+| `GET`  | `/v1/models`           | Merged catalog. Kiro ids prefixed `kiro/`; Copilot ids `copilot/`. |
+| `POST` | `/v1/messages`         | Anthropic Messages API. Routed by `model`.                        |
+| `POST` | `/v1/chat/completions` | OpenAI Chat Completions API. Routed by `model`.                   |
+| `GET`  | `/dashboard`           | Live credits &amp; token-usage monitor (HTML). Also at `/`.       |
+| `GET`  | `/stats`               | JSON token-usage stats for the current session.                   |
+| `GET`  | `/credits`             | Per-provider auth state and (for Copilot) quota snapshots.        |
+
+## Routing rules
+
+For a request's `model`:
+
+1. starts with `COPILOT_PREFIX` (e.g. `copilot/gpt-4o`) → **Copilot** (prefix stripped)
+2. starts with `KIRO_PREFIX` (e.g. `kiro/claude-opus-5`) → **Kiro** (prefix stripped)
+3. a bare id that exists only in the Copilot catalog → **Copilot**
+4. everything else → **Kiro** (bare ids still work, for backward compatibility)
+
+So in a model picker you can tell them apart at a glance:
+`kiro/claude-opus-5`, `kiro/glm-5` vs `copilot/gpt-4o`, `copilot/claude-sonnet-4`.
+
+Cross-protocol calls are translated automatically (Anthropic ⇄ OpenAI), so a
+Copilot model works through `/v1/messages` and a Kiro model works through
+`/v1/chat/completions`.
+
+## Monitoring
+
+Open **http://localhost:9000/dashboard** for a live view (auto-refreshes every
+4s) of:
+
+- **Totals** — requests, errors, input/output/total tokens.
+- **Per-provider usage** — the same metrics split for Kiro vs GitHub Copilot.
+- **Credits &amp; quota** — per-provider auth state; Copilot shows token expiry
+  and quota snapshots, and a **Connect** button (device-code login) when it is
+  not yet authenticated.
+- **Per-model usage** — a table of counts, errors, and tokens per model.
+
+Stats are in-memory and reset on restart.
+
 ## How it is self-contained
 
-Everything runs from this one repo. The two providers are implemented here as
-original TypeScript modules:
+Everything runs from this one repo. The two providers are original TypeScript
+modules — no external gateway process is started or required:
 
 - **`src/providers/copilot.ts`** — reads your GitHub OAuth token, exchanges it
   for a Copilot token (cached + auto-refreshed), lists Copilot models, and calls
@@ -39,134 +211,25 @@ original TypeScript modules:
   (`generateAssistantResponse`), and decodes its AWS event-stream response into
   clean Anthropic output.
 
-No external gateway process is started or required. These modules were written
-from scratch (inspired by how `jwadow/kiro-gateway` and `caozhiyuan/copilot-api`
-work, but containing none of their code).
+These modules were written from scratch — inspired by how
+[`jwadow/kiro-gateway`](https://github.com/jwadow/kiro-gateway) and
+[`caozhiyuan/copilot-api`](https://github.com/caozhiyuan/copilot-api) work, but
+containing none of their code.
 
 ## Requirements
 
-- Node.js >= 20, and the `sqlite3` CLI (ships with macOS).
-- **GitHub Copilot** auth: a token at `~/.local/share/copilot-api/github_token`
-  (or set `GITHUB_TOKEN`).
-- **Kiro** auth: logged in via `kiro login` (creates the kiro-cli database).
+- **Node.js ≥ 20** and the `sqlite3` CLI (ships with macOS).
+- **GitHub Copilot** auth — a token at
+  `~/.local/share/copilot-api/github_token` (or set `GITHUB_TOKEN`), or use the
+  dashboard **Connect** button.
+- **Kiro** auth — logged in via `kiro login` (creates the kiro-cli database).
 
-You can run with just one provider configured; the gateway serves whatever is
-authenticated.
+## Banner
 
-## Quick start
-
-```bash
-npm install
-npm start
-# open http://localhost:9000/dashboard
-# on first run it offers to configure Claude Code for you
-```
-
-Or run it straight from GitHub with no clone:
-
-```bash
-npx github:DaddyNinio/multi-ai-provider-gateway
-```
-
-### Compiled build
-
-```bash
-npm run build && npm run serve
-```
-
-## Configuration
-
-All optional — defaults work out of the box. See `.env.example`.
-
-| Variable             | Default      | Description                                  |
-| -------------------- | ------------ | -------------------------------------------- |
-| `PORT`               | `9000`       | Port this gateway listens on.                |
-| `COPILOT_PREFIX`     | `copilot/`   | Namespace applied to Copilot model ids.      |
-| `KIRO_PREFIX`        | `kiro/`      | Namespace applied to Kiro model ids.         |
-| `REQUEST_TIMEOUT_MS` | `600000`     | Per-request timeout (ms).                    |
-| `GITHUB_TOKEN`       | *(file)*     | Override the GitHub OAuth token.             |
-
-## Endpoints
-
-| Method | Path                   | Description                                                      |
-| ------ | ---------------------- | ---------------------------------------------------------------- |
-| `GET`  | `/health`              | Reports which providers are authenticated.                       |
-| `GET`  | `/v1/models`           | Merged catalog. Kiro ids prefixed `kiro/`; Copilot ids `copilot/`. |
-| `POST` | `/v1/messages`         | Anthropic Messages API. Routed by `model`.                       |
-| `POST` | `/v1/chat/completions` | OpenAI Chat Completions API. Routed by `model`.                  |
-| `GET`  | `/dashboard`           | Live credits &amp; token-usage monitor (HTML). Also at `/`.      |
-| `GET`  | `/stats`               | JSON token-usage stats for the current session.                  |
-| `GET`  | `/credits`             | Which providers are authenticated.                               |
-
-### Routing rules
-
-For a request's `model`:
-
-1. starts with `COPILOT_PREFIX` (e.g. `copilot/gpt-4o`) → **Copilot** (prefix stripped)
-2. starts with `KIRO_PREFIX` (e.g. `kiro/claude-opus-5`) → **Kiro** (prefix stripped)
-3. a bare id that exists only in the Copilot catalog → **Copilot**
-4. everything else → **Kiro** (bare ids still work, for backward compatibility)
-
-So in a client's model picker you can tell them apart at a glance:
-`kiro/claude-opus-5`, `kiro/glm-5` vs `copilot/gpt-4o`, `copilot/claude-sonnet-4`.
-
-Cross-protocol calls are translated automatically (Anthropic↔OpenAI), so a
-Copilot model works through `/v1/messages` and a Kiro model works through
-`/v1/chat/completions`.
-
-## Monitoring
-
-Open **http://localhost:9000/dashboard** for a live view (auto-refreshes every
-4s) of per-model request counts, errors, and input/output token totals, plus
-which providers are authenticated. Stats are in-memory and reset on restart.
-
-## Use with Claude Code
-
-The easiest way is to let the gateway configure Claude Code for you. It writes
-`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and
-`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` into `~/.claude/settings.json`,
-**merging** with your existing settings and saving a timestamped backup first.
-
-```bash
-# One-shot: configure Claude Code, then exit
-npm run setup-claude
-# or
-multi-ai-provider-gateway --setup-claude
-```
-
-When you simply start the server it also **offers to configure Claude Code**
-interactively the first time:
-
-```bash
-npm start
-# ◆ multi-ai-provider-gateway  http://localhost:9000
-# Configure Claude Code to use this gateway now? [Y/n]
-```
-
-After that, just run Claude Code and pick any model from both providers:
-
-```bash
-claude
-# then type: /models
-```
-
-Prefer to set it yourself? Point Claude Code at the gateway manually:
-
-```bash
-ANTHROPIC_BASE_URL=http://localhost:9000 ANTHROPIC_AUTH_TOKEN=any-value claude
-```
-
-### CLI options
-
-| Flag                 | Description                                                       |
-| -------------------- | ---------------------------------------------------------------- |
-| `--setup-claude`     | Configure Claude Code to use this gateway, then exit.            |
-| `--port, -p <n>`     | Port to listen on (default `9000`, or `$PORT`).                  |
-| `--token <value>`    | Auth token to write during setup (default: random, URL-safe).    |
-| `--no-setup-prompt`  | Skip the interactive "configure Claude Code?" prompt.            |
-| `--yes, -y`          | Assume "yes" to prompts (non-interactive setup).                 |
-| `--help, -h`         | Show help.                                                       |
-
+The banner at the top is `docs/banner.png`. To generate one with an AI image
+tool (Midjourney, DALL·E, Stable Diffusion, Ideogram, etc.), use the prompt in
+[`docs/banner-prompt.md`](docs/banner-prompt.md), export at **1280×320** (4:1),
+and save it to `docs/banner.png`.
 
 ## Credits
 
@@ -177,4 +240,4 @@ code from either project is included here.
 
 ## License
 
-MIT
+[MIT](LICENSE)

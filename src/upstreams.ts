@@ -6,6 +6,7 @@
 import type { Config } from "./config.js";
 import * as copilot from "./providers/copilot.js";
 import * as kiro from "./providers/kiro.js";
+import { setCopilotPriceFromBilling } from "./pricing.js";
 
 export interface ModelEntry {
   id: string;
@@ -56,6 +57,8 @@ export async function getMergedModels(cfg: Config): Promise<ModelEntry[]> {
       if (!isChatModel(m)) continue;
       seen.add(m.id);
       copilotModelIds.add(m.id);
+      // Learn per-model pricing for spend estimation (best-effort).
+      setCopilotPriceFromBilling(m.id, (m as { billing?: unknown }).billing);
       merged.push({ id: `${cfg.copilotPrefix}${m.id}`, object: "model", owned_by: "copilot-api" });
     }
   } catch {

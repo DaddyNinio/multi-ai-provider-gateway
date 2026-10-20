@@ -51,6 +51,8 @@ export interface CopilotQuota {
   quotaSnapshots?: Record<string, unknown>;
   /** Quota reset date, if present. */
   quotaResetDate?: string;
+  /** Copilot plan name (e.g. "individual", "business"), if known. */
+  plan?: string;
 }
 
 /**
@@ -276,12 +278,41 @@ export async function getCopilotQuota(): Promise<CopilotQuota> {
     return { available: false };
   }
   const c = tokenCache;
-  return {
+  const out: CopilotQuota = {
     available: true,
     tokenExpiresAt: c?.expiresAt ? new Date(c.expiresAt * 1000).toISOString() : undefined,
     quotaSnapshots: c?.quotaSnapshots,
     quotaResetDate: c?.quotaResetDate,
   };
+
+  // Best-effort: fetch live quota/credits from the Copilot user endpoint.
+  // Returns `quota_snapshots` (chat / completions / premium_interactions),
+  // `quota_reset_date`, and the plan type. Failures are non-fatal.
+  try {
+    const githubToken = await getGitHubToken();
+    const res = await fetch(`${GITHUB_API_BASE}/copilot_internal/user`, {
+      method: "GET",
+      headers: {
+        authorization: `token ${githubToken}`,
+        "user-agent": "GitHubCopilotChat/0.68.0",
+        "editor-version": "vscode/1.95.0",
+        "editor-plugin-version": "copilot-chat/0.68.0",
+        "x-github-api-version": "2025-04-01",
+      },
+    });
+    if (res.ok) {
+      const data = (await res.json()) as Record<string, any>;
+      if (data.quota_snapshots && typeof data.quota_snapshots === "object") {
+        out.quotaSnapshots = data.quota_snapshots;
+      }
+      if (typeof data.quota_reset_date === "string") out.quotaResetDate = data.quota_reset_date;
+      if (typeof data.copilot_plan === "string") out.plan = data.copilot_plan;
+    }
+  } catch {
+    // keep token-cache values
+  }
+
+  return out;
 }
 
 // ============================================================================

@@ -190,8 +190,8 @@ All optional — defaults work out of the box. See [`.env.example`](.env.example
 | `POST` | `/v1/messages`         | Anthropic Messages API. Routed by `model`.                        |
 | `POST` | `/v1/chat/completions` | OpenAI Chat Completions API. Routed by `model`.                   |
 | `GET`  | `/dashboard`           | Live credits &amp; token-usage monitor (HTML). Also at `/`.       |
-| `GET`  | `/stats`               | JSON token-usage stats for the current session.                   |
-| `GET`  | `/credits`             | Per-provider auth state and (for Copilot) quota snapshots.        |
+| `GET`  | `/stats`               | JSON usage stats: tokens + estimated spend for the session.       |
+| `GET`  | `/credits`             | Per-provider auth state, plan, and Copilot credits/quota usage.   |
 
 ## Routing rules
 
@@ -241,13 +241,20 @@ Effort is applied on the Copilot backend (whose models advertise
 Open **http://localhost:9000/dashboard** for a live view (auto-refreshes every
 4s) of:
 
-- **Totals** — requests, errors, input/output/total tokens.
-- **Per-provider usage** — the same metrics split for Kiro vs GitHub Copilot.
-- **Credits &amp; quota** — per-provider auth state; Copilot shows token expiry
-  and quota snapshots, and a **Connect** button (device-code login) when it is
-  not yet authenticated.
-- **Per-model usage** — a table of counts, errors, and tokens per model.
+- **Totals** — requests, errors, input/output/total tokens, and estimated spend.
+- **Per-provider usage** — the same metrics split for Kiro vs GitHub Copilot,
+  each with its own estimated spend.
+- **Credits &amp; quota** — per-provider auth state and credits usage. Copilot
+  shows its plan, token expiry, quota reset date, and per-quota usage
+  (`chat`, `completions`, `premium_interactions`) as **used / entitlement** with
+  percent remaining. Kiro is a subscription/Amazon Q plan with no per-token
+  meter, so its usage is reflected in the session stats above. A **Connect**
+  button (device-code login) appears for any provider not yet authenticated.
+- **Per-model usage** — a table of counts, errors, tokens, and estimated spend
+  per model.
 
+Spend is **estimated** from Copilot's published per-model token prices
+(`billing.token_prices`); Kiro has no per-token price, so its spend shows `—`.
 Stats are in-memory and reset on restart.
 
 ## How it is self-contained

@@ -51,6 +51,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     <div class="card"><div class="label">Input tokens</div><div class="value" id="t-in">—</div></div>
     <div class="card"><div class="label">Output tokens</div><div class="value" id="t-out">—</div></div>
     <div class="card"><div class="label">Total tokens</div><div class="value" id="t-tot">—</div></div>
+    <div class="card"><div class="label">Est. spend</div><div class="value" id="t-cost">—</div></div>
   </div>
 
   <h2>Per-provider usage (this session)</h2>
@@ -64,14 +65,16 @@ export const DASHBOARD_HTML = `<!doctype html>
     <thead><tr>
       <th>Backend</th><th>Model</th>
       <th class="num">Reqs</th><th class="num">Errs</th>
-      <th class="num">In</th><th class="num">Out</th><th class="num">Total</th><th>Last used</th>
+      <th class="num">In</th><th class="num">Out</th><th class="num">Total</th>
+      <th class="num">Est. $</th><th>Last used</th>
     </tr></thead>
-    <tbody id="rows"><tr><td colspan="8" class="muted">no requests yet</td></tr></tbody>
+    <tbody id="rows"><tr><td colspan="9" class="muted">no requests yet</td></tr></tbody>
   </table>
 
 <script>
 const $ = id => document.getElementById(id);
 const fmt = n => (n ?? 0).toLocaleString();
+const money = n => (n == null ? '—' : '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: n > 0 && n < 0.01 ? 4 : 2, maximumFractionDigits: 4 }));
 const ago = iso => { if (!iso) return '—'; const s = Math.round((Date.now()-new Date(iso))/1000);
   return s<60? s+'s ago' : s<3600? Math.round(s/60)+'m ago' : Math.round(s/3600)+'h ago'; };
 const when = iso => { try { return iso ? new Date(iso).toLocaleString() : '—'; } catch { return '—'; } };
@@ -91,14 +94,17 @@ function renderTotals(s) {
   setText('t-in',  fmt(t.inputTokens));
   setText('t-out', fmt(t.outputTokens));
   setText('t-tot', fmt((t.inputTokens||0) + (t.outputTokens||0)));
+  setText('t-cost', money(t.estCostUsd));
   setText('uptime', 'since ' + when(s.startedAt));
 }
 
 function renderByProvider(s) {
   const by = s.byBackend || {};
   $('byprovider').innerHTML = PROVIDERS.map(p => {
-    const b = by[p.key] || { requests:0, errors:0, inputTokens:0, outputTokens:0 };
+    const b = by[p.key] || { requests:0, errors:0, inputTokens:0, outputTokens:0, estCostUsd:0 };
     const total = (b.inputTokens||0) + (b.outputTokens||0);
+    // Kiro spend is not metered per-token; show "—" instead of $0.
+    const spend = p.key === 'kiro-gateway' ? '—' : money(b.estCostUsd);
     return \`<div class="card">
       <div class="label"><span class="pill \${p.cls}">\${p.label}</span></div>
       <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">
@@ -107,6 +113,7 @@ function renderByProvider(s) {
         <div class="muted">input tokens</div><div class="num">\${fmt(b.inputTokens)}</div>
         <div class="muted">output tokens</div><div class="num">\${fmt(b.outputTokens)}</div>
         <div class="muted">total tokens</div><div class="num"><b>\${fmt(total)}</b></div>
+        <div class="muted">est. spend</div><div class="num"><b>\${spend}</b></div>
       </div>
     </div>\`;
   }).join('');
@@ -114,17 +121,33 @@ function renderByProvider(s) {
 
 function renderQuotaLines(u) {
   const lines = [];
+  if (u.plan) lines.push('<div class="muted">plan</div><div>' + u.plan + '</div>');
   if (u.tokenExpiresAt) lines.push('<div class="muted">token expires</div><div>' + when(u.tokenExpiresAt) + '</div>');
   if (u.quotaResetDate) lines.push('<div class="muted">quota resets</div><div>' + when(u.quotaResetDate) + '</div>');
   const snaps = u.quotaSnapshots || null;
   if (snaps && typeof snaps === 'object') {
     for (const [name, val] of Object.entries(snaps)) {
       if (val && typeof val === 'object') {
-        const rem = val.remaining ?? val.remaining_count ?? val.entitlement_remaining;
+        const pretty = name.replace(/_/g, ' ');
+        if (val.unlimited === true) {
+          lines.push('<div class="muted">' + pretty + '</div><div class="num">unlimited</div>');
+          continue;
+        }
+        // Prefer an explicit "used / entitlement" view when present (credits).
+        const used = val.credits_used ?? val.used;
+        const ent = val.entitlement ?? val.entitlement_remaining;
         const pct = val.percent_remaining;
-        const show = rem != null ? fmt(rem) + (pct != null ? ' (' + pct + '%)' : '')
-                   : (pct != null ? pct + '%' : JSON.stringify(val));
-        lines.push('<div class="muted">' + name + '</div><div class="num">' + show + '</div>');
+        let show;
+        if (ent != null && Number(ent) > 0) {
+          show = fmt(used ?? 0) + ' / ' + fmt(ent) + (pct != null ? ' · ' + pct + '% left' : '');
+        } else if (used != null) {
+          show = fmt(used) + ' used';
+        } else {
+          const rem = val.remaining ?? val.remaining_count ?? val.quota_remaining;
+          show = rem != null ? fmt(rem) + (pct != null ? ' (' + pct + '%)' : '')
+               : (pct != null ? pct + '% left' : (val.has_quota === false ? 'n/a' : JSON.stringify(val)));
+        }
+        lines.push('<div class="muted">' + pretty + '</div><div class="num">' + show + '</div>');
       } else {
         lines.push('<div class="muted">' + name + '</div><div class="num">' + fmt(val) + '</div>');
       }
@@ -143,6 +166,9 @@ function renderCredits(c) {
     let body;
     if (authed) {
       body = '<span class="pill ' + p.cls + '">authenticated</span>' + renderQuotaLines(u);
+      if (p.key === 'kiro-gateway' && u.metered === false) {
+        body += '<div class="auth-info muted">' + (u.detail || 'subscription — no per-token meter') + '</div>';
+      }
     } else {
       body = '<div class="muted" style="margin-bottom:8px">not authenticated</div>'
         + '<button data-auth="' + p.auth + '" class="connect-btn">Connect ' + p.label + '</button>'
@@ -167,8 +193,9 @@ function renderModels(s) {
       <td class="num">\${fmt(m.inputTokens)}</td>
       <td class="num">\${fmt(m.outputTokens)}</td>
       <td class="num">\${fmt((m.inputTokens||0)+(m.outputTokens||0))}</td>
+      <td class="num">\${money(m.estCostUsd)}</td>
       <td class="muted">\${ago(m.lastUsed)}</td>
-    </tr>\`).join('') : '<tr><td colspan="8" class="muted">no requests yet</td></tr>';
+    </tr>\`).join('') : '<tr><td colspan="9" class="muted">no requests yet</td></tr>';
 }
 
 async function tick() {

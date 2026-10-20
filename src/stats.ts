@@ -3,6 +3,8 @@
  * Resets when the process restarts (no persistence by design — it's a live monitor).
  */
 
+import { estimateCost } from "./pricing.js";
+
 export interface ModelStat {
   model: string;
   backend: string;
@@ -11,6 +13,8 @@ export interface ModelStat {
   inputTokens: number;
   outputTokens: number;
   lastUsed: string | null;
+  /** Estimated USD spend for this model, or null if price unknown (e.g. Kiro). */
+  estCostUsd: number | null;
 }
 
 interface Totals {
@@ -18,6 +22,8 @@ interface Totals {
   errors: number;
   inputTokens: number;
   outputTokens: number;
+  /** Estimated USD spend across models with known pricing. */
+  estCostUsd: number;
 }
 
 const stats = new Map<string, ModelStat>();
@@ -39,6 +45,7 @@ function ensure(backend: string, model: string): ModelStat {
       inputTokens: 0,
       outputTokens: 0,
       lastUsed: null,
+      estCostUsd: null,
     };
     stats.set(key, s);
   }
@@ -86,26 +93,31 @@ export function snapshot(): {
   byBackend: Record<string, Totals>;
   models: ModelStat[];
 } {
-  const totals: Totals = { requests: 0, errors: 0, inputTokens: 0, outputTokens: 0 };
+  const totals: Totals = { requests: 0, errors: 0, inputTokens: 0, outputTokens: 0, estCostUsd: 0 };
   const byBackend: Record<string, Totals> = {};
   const models = [...stats.values()].sort(
     (a, b) => b.inputTokens + b.outputTokens - (a.inputTokens + a.outputTokens),
   );
   for (const s of models) {
+    // Recompute estimated cost from current prices each snapshot.
+    s.estCostUsd = estimateCost(s.backend, s.model, s.inputTokens, s.outputTokens);
     totals.requests += s.requests;
     totals.errors += s.errors;
     totals.inputTokens += s.inputTokens;
     totals.outputTokens += s.outputTokens;
+    if (s.estCostUsd != null) totals.estCostUsd += s.estCostUsd;
     const b = (byBackend[s.backend] ??= {
       requests: 0,
       errors: 0,
       inputTokens: 0,
       outputTokens: 0,
+      estCostUsd: 0,
     });
     b.requests += s.requests;
     b.errors += s.errors;
     b.inputTokens += s.inputTokens;
     b.outputTokens += s.outputTokens;
+    if (s.estCostUsd != null) b.estCostUsd += s.estCostUsd;
   }
   return { startedAt, totals, byBackend, models };
 }

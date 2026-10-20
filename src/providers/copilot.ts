@@ -33,6 +33,24 @@ export interface CopilotTokenResponse {
     /** Telemetry endpoint */
     telemetry?: string;
   };
+  /** Optional quota snapshots (chat / completions / premium interactions). */
+  quota_snapshots?: Record<string, unknown>;
+  /** Optional reset timestamp for quotas (unix seconds). */
+  quota_reset_date?: string;
+  /** Any other fields the token endpoint returns. */
+  [key: string]: unknown;
+}
+
+/** Best-effort quota/credit snapshot for the dashboard. */
+export interface CopilotQuota {
+  /** Whether Copilot is currently authenticated. */
+  available: boolean;
+  /** When the current Copilot token expires (ISO string), if known. */
+  tokenExpiresAt?: string;
+  /** Raw quota snapshots from the token endpoint, if present. */
+  quotaSnapshots?: Record<string, unknown>;
+  /** Quota reset date, if present. */
+  quotaResetDate?: string;
 }
 
 /**
@@ -101,6 +119,8 @@ interface TokenCache {
   token: string;
   expiresAt: number;
   baseUrl: string;
+  quotaSnapshots?: Record<string, unknown>;
+  quotaResetDate?: string;
 }
 
 let tokenCache: TokenCache | null = null;
@@ -225,6 +245,12 @@ export async function getCopilotToken(): Promise<string> {
     token: response.token,
     expiresAt: response.expires_at,
     baseUrl: response.endpoints?.api || COPILOT_DEFAULT_BASE,
+    quotaSnapshots:
+      response.quota_snapshots && typeof response.quota_snapshots === "object"
+        ? (response.quota_snapshots as Record<string, unknown>)
+        : undefined,
+    quotaResetDate:
+      typeof response.quota_reset_date === "string" ? response.quota_reset_date : undefined,
   };
 
   return tokenCache.token;
@@ -237,6 +263,25 @@ export async function getCopilotToken(): Promise<string> {
  */
 function getCopilotBaseUrl(): string {
   return tokenCache?.baseUrl || COPILOT_DEFAULT_BASE;
+}
+
+/**
+ * Best-effort quota/credit snapshot for the dashboard. Forces a token fetch so
+ * authentication state is accurate; returns { available:false } if not signed in.
+ */
+export async function getCopilotQuota(): Promise<CopilotQuota> {
+  try {
+    await getCopilotToken();
+  } catch {
+    return { available: false };
+  }
+  const c = tokenCache;
+  return {
+    available: true,
+    tokenExpiresAt: c?.expiresAt ? new Date(c.expiresAt * 1000).toISOString() : undefined,
+    quotaSnapshots: c?.quotaSnapshots,
+    quotaResetDate: c?.quotaResetDate,
+  };
 }
 
 // ============================================================================

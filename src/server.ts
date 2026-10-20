@@ -74,12 +74,24 @@ export function createApp(cfg: Config): Hono {
 /** Best-effort credit/quota info. Copilot exposes quota via its token endpoint. */
 async function getCredits(): Promise<Record<string, unknown>> {
   const providers: Record<string, unknown> = {};
+
+  // Copilot: surface real quota snapshots + token expiry when available.
   try {
-    await copilot.getCopilotToken();
-    providers["copilot-api"] = { available: true, note: "authenticated" };
+    const q = await copilot.getCopilotQuota();
+    providers["copilot-api"] = q.available
+      ? {
+          available: true,
+          note: "authenticated",
+          tokenExpiresAt: q.tokenExpiresAt,
+          quotaResetDate: q.quotaResetDate,
+          quotaSnapshots: q.quotaSnapshots,
+        }
+      : { available: false };
   } catch {
     providers["copilot-api"] = { available: false };
   }
+
+  // Kiro: report authentication state (runtime does not expose a credit meter).
   try {
     kiro.getKiroCredentials();
     providers["kiro-gateway"] = { available: true, note: "authenticated" };

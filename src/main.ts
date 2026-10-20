@@ -10,6 +10,7 @@ import { loadConfig } from "./config.js";
 import { createApp } from "./server.js";
 import { health } from "./upstreams.js";
 import { setupClaude, describeSetup } from "./claude-setup.js";
+import { login } from "./cli-auth.js";
 import { box, c, statusGlyph } from "./ui.js";
 
 /** Minimal .env loader (no dependency): KEY=VALUE lines, # comments. */
@@ -42,6 +43,8 @@ interface CliArgs {
   setupClaude: boolean;
   noSetupPrompt: boolean;
   yes: boolean;
+  /** Provider login target: "copilot" | "kiro" | "all"; undefined = not requested. */
+  login?: "copilot" | "kiro" | "all";
   port?: number;
   token?: string;
 }
@@ -78,12 +81,33 @@ function parseArgs(argv: string[]): CliArgs {
       case "--token":
         args.token = argv[++i];
         break;
+      case "--login":
+      case "--connect": {
+        const next = argv[i + 1];
+        if (next && !next.startsWith("-")) {
+          i++;
+          args.login = normalizeLoginTarget(next);
+        } else {
+          args.login = "all";
+        }
+        break;
+      }
       default:
         if (a.startsWith("--port=")) args.port = Number(a.slice("--port=".length));
         else if (a.startsWith("--token=")) args.token = a.slice("--token=".length);
+        else if (a.startsWith("--login=")) args.login = normalizeLoginTarget(a.slice("--login=".length));
+        else if (a.startsWith("--connect=")) args.login = normalizeLoginTarget(a.slice("--connect=".length));
     }
   }
   return args;
+}
+
+/** Map a user-supplied provider name to a login target. */
+function normalizeLoginTarget(v: string): "copilot" | "kiro" | "all" {
+  const s = v.trim().toLowerCase();
+  if (s === "copilot" || s === "github" || s === "gh") return "copilot";
+  if (s === "kiro" || s === "amazonq" || s === "q" || s === "amazon") return "kiro";
+  return "all";
 }
 
 function printHelp(): void {
@@ -95,6 +119,7 @@ function printHelp(): void {
     `  multi-ai-provider-gateway [options]`,
     "",
     c.bold("OPTIONS"),
+    `  ${c.cyan("--login [provider]")}   Sign in to a provider: copilot | kiro | all (default all), then exit`,
     `  ${c.cyan("--setup-claude")}       Configure Claude Code to use this gateway, then exit`,
     `  ${c.cyan("--port, -p <n>")}       Port to listen on (default 9000, or $PORT)`,
     `  ${c.cyan("--token <value>")}      Auth token to write during setup (default: random)`,
@@ -105,6 +130,12 @@ function printHelp(): void {
     c.bold("EXAMPLES"),
     `  ${c.gray("# Start the server (prompts to configure Claude Code the first time)")}`,
     `  multi-ai-provider-gateway`,
+    "",
+    `  ${c.gray("# Sign in to GitHub Copilot from the terminal")}`,
+    `  multi-ai-provider-gateway --login copilot`,
+    "",
+    `  ${c.gray("# Sign in to both providers")}`,
+    `  multi-ai-provider-gateway --login`,
     "",
     `  ${c.gray("# Just configure Claude Code and exit")}`,
     `  multi-ai-provider-gateway --setup-claude`,
@@ -199,6 +230,13 @@ async function main(): Promise<void> {
   }
   const cfg = loadConfig();
   const base = baseUrlFor(cfg.port);
+
+  // Login-only mode: authenticate a provider from the terminal and exit.
+  if (args.login) {
+    const ok = await login(args.login);
+    process.exitCode = ok ? 0 : 1;
+    return;
+  }
 
   // Setup-only mode: configure Claude Code and exit.
   if (args.setupClaude) {

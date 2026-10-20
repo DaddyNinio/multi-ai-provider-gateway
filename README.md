@@ -41,11 +41,13 @@ or depend on any third-party gateway server.
 
 - [Features](#features)
 - [Quick start](#quick-start)
+- [Authentication](#authentication)
 - [Use with Claude Code](#use-with-claude-code)
 - [CLI options](#cli-options)
 - [Configuration](#configuration)
 - [Endpoints](#endpoints)
 - [Routing rules](#routing-rules)
+- [Reasoning effort](#reasoning-effort)
 - [Monitoring](#monitoring)
 - [How it is self-contained](#how-it-is-self-contained)
 - [Requirements](#requirements)
@@ -92,6 +94,32 @@ npm run build && npm run serve
 You can run with just one provider authenticated — the gateway serves whatever
 is available.
 
+## Authentication
+
+Sign in to each provider once. Credentials are read from the same files the
+official tools use, so you can authenticate however you like:
+
+- **From the terminal** (built in):
+
+  ```bash
+  npm run login                 # sign in to both providers
+  multi-ai-provider-gateway --login copilot   # just GitHub Copilot
+  multi-ai-provider-gateway --login kiro      # just Kiro / Amazon Q
+  ```
+
+  `--login copilot` runs GitHub's device-code flow (shows a code + URL and waits
+  until you authorize). `--login kiro` launches `kiro login` (AWS SSO) and waits
+  until the gateway can see valid credentials.
+
+- **From the dashboard** — open `/dashboard` and click **Connect** next to a
+  provider that isn't authenticated yet.
+
+- **Manually** — drop a GitHub token at `~/.local/share/copilot-api/github_token`
+  (or set `GITHUB_TOKEN`), and run `kiro login` for Kiro.
+
+You can run with just one provider authenticated; the gateway serves whatever is
+available.
+
 ## Use with Claude Code
 
 The easiest path is to let the gateway configure Claude Code for you. It writes
@@ -133,6 +161,7 @@ ANTHROPIC_BASE_URL=http://localhost:9000 ANTHROPIC_AUTH_TOKEN=any-value claude
 
 | Flag                 | Description                                                    |
 | -------------------- | ------------------------------------------------------------- |
+| `--login [provider]` | Sign in to a provider from the terminal: `copilot`, `kiro`, or `all` (default). |
 | `--setup-claude`     | Configure Claude Code to use this gateway, then exit.         |
 | `--port, -p <n>`     | Port to listen on (default `9000`, or `$PORT`).               |
 | `--token <value>`    | Auth token to write during setup (default: random, URL-safe). |
@@ -179,6 +208,33 @@ So in a model picker you can tell them apart at a glance:
 Cross-protocol calls are translated automatically (Anthropic ⇄ OpenAI), so a
 Copilot model works through `/v1/messages` and a Kiro model works through
 `/v1/chat/completions`.
+
+## Reasoning effort
+
+Many Copilot models support a reasoning-effort level. You can control it per
+request, in either API shape:
+
+- **OpenAI** — send `reasoning_effort` directly:
+
+  ```json
+  { "model": "copilot/gpt-6-sol", "reasoning_effort": "high",
+    "messages": [{ "role": "user", "content": "…" }] }
+  ```
+
+- **Anthropic** — send a `thinking` block; the gateway maps the budget to an
+  effort level:
+
+  ```json
+  { "model": "copilot/claude-opus-5", "max_tokens": 1024,
+    "thinking": { "type": "enabled", "budget_tokens": 16000 },
+    "messages": [{ "role": "user", "content": "…" }] }
+  ```
+
+  Budget → effort mapping: `≤4000` → `low`, `≤12000` → `medium`, `≤24000` →
+  `high`, else `xhigh`. An explicit `reasoning_effort` always wins.
+
+Effort is applied on the Copilot backend (whose models advertise
+`reasoning_effort`). Kiro requests ignore it.
 
 ## Monitoring
 

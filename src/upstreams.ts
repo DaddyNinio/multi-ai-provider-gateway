@@ -19,6 +19,20 @@ export type Backend = "kiro-gateway" | "copilot-api";
 /** Plain copilot model ids (without prefix), learned from the last listing. */
 const copilotModelIds = new Set<string>();
 
+/**
+ * Keep only chat-usable Copilot models. Copilot's /models catalog also returns
+ * embedding models and other non-chat utilities; those can't serve chat/messages
+ * requests. We treat `capabilities.type === "chat"` as the keeper, but fall back
+ * to keeping the model when the field is absent (forward-compatible).
+ */
+function isChatModel(m: { id: string; capabilities?: unknown }): boolean {
+  const caps = m.capabilities;
+  if (caps && typeof caps === "object" && "type" in caps) {
+    return (caps as { type?: unknown }).type === "chat";
+  }
+  return true; // unknown shape — don't hide it
+}
+
 /** Build the merged /v1/models catalog from both providers. */
 export async function getMergedModels(cfg: Config): Promise<ModelEntry[]> {
   const merged: ModelEntry[] = [];
@@ -31,11 +45,16 @@ export async function getMergedModels(cfg: Config): Promise<ModelEntry[]> {
 
   // Copilot models (live) — namespaced with the prefix. Failures are tolerated
   // so the gateway still serves kiro if Copilot auth is unavailable.
+  // We keep only chat-capable models (Copilot's catalog also includes
+  // embeddings / non-chat utility models, which aren't usable here).
   try {
     const cModels = await copilot.listModels();
     copilotModelIds.clear();
+    const seen = new Set<string>();
     for (const m of cModels) {
-      if (!m.id) continue;
+      if (!m.id || seen.has(m.id)) continue;
+      if (!isChatModel(m)) continue;
+      seen.add(m.id);
       copilotModelIds.add(m.id);
       merged.push({ id: `${cfg.copilotPrefix}${m.id}`, object: "model", owned_by: "copilot-api" });
     }

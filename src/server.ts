@@ -221,13 +221,39 @@ function anthropicToOpenAI(p: any): any {
   for (const m of p.messages ?? []) {
     messages.push({ role: m.role, content: anthropicContentToText(m.content) });
   }
-  return {
+  const out: any = {
     model: p.model,
     messages,
     max_tokens: p.max_tokens,
     temperature: p.temperature,
     stream: Boolean(p.stream),
   };
+  const effort = resolveEffort(p);
+  if (effort) out.reasoning_effort = effort;
+  return out;
+}
+
+/**
+ * Resolve a reasoning-effort level ("low" | "medium" | "high" | "xhigh") from a
+ * request. Accepts an explicit OpenAI-style `reasoning_effort`, or derives one
+ * from an Anthropic `thinking` block (enabled + budget_tokens).
+ */
+function resolveEffort(p: any): string | undefined {
+  const explicit = p?.reasoning_effort ?? p?.effort;
+  if (typeof explicit === "string") {
+    const v = explicit.toLowerCase();
+    if (["low", "medium", "high", "xhigh"].includes(v)) return v;
+  }
+  const thinking = p?.thinking;
+  if (thinking && typeof thinking === "object" && thinking.type === "enabled") {
+    const budget = Number(thinking.budget_tokens ?? 0);
+    if (budget <= 0) return undefined;
+    if (budget <= 4000) return "low";
+    if (budget <= 12000) return "medium";
+    if (budget <= 24000) return "high";
+    return "xhigh";
+  }
+  return undefined;
 }
 
 /** OpenAI chat response -> Anthropic Messages response. */

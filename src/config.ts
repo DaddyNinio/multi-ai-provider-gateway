@@ -1,5 +1,5 @@
 /**
- * Configuration for unified-ai-gateway, loaded from environment variables.
+ * Configuration for multi-ai-provider-gateway, loaded from environment variables.
  * This build talks DIRECTLY to GitHub Copilot and the Kiro/Amazon Q runtime —
  * there are no upstream gateway URLs to configure.
  */

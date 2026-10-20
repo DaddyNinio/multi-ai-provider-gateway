@@ -223,7 +223,7 @@ export function getKiroCredentials(): KiroCredentials {
  * @param fingerprint - Optional machine fingerprint (default: static value)
  * @returns Headers object for Kiro runtime request
  */
-function getKiroHeaders(accessToken: string, fingerprint = "unified-ai-gateway"): Record<string, string> {
+function getKiroHeaders(accessToken: string, fingerprint = "multi-ai-provider-gateway"): Record<string, string> {
   // Generate unique invocation ID for this request
   const invocationId = crypto.randomUUID();
   

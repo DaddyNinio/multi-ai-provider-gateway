@@ -8,7 +8,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>unified-ai-gateway — monitor</title>
+<title>multi-ai-provider-gateway — monitor</title>
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
@@ -38,7 +38,7 @@ export const DASHBOARD_HTML = `<!doctype html>
 </style>
 </head>
 <body>
-  <h1>unified-ai-gateway</h1>
+  <h1>multi-ai-provider-gateway</h1>
   <div class="sub">credits &amp; token monitor · auto-refresh every 4s · <span id="uptime" class="muted"></span></div>
 
   <div class="cards">

@@ -37,7 +37,7 @@ const cfg = loadConfig();
 
 const app = createApp(cfg);
 serve({ fetch: app.fetch, port: cfg.port }, (info) => {
-  console.log(`unified-ai-gateway listening on http://localhost:${info.port}`);
+  console.log(`multi-ai-provider-gateway listening on http://localhost:${info.port}`);
   console.log(`  dashboard -> http://localhost:${info.port}/dashboard`);
   console.log(`  providers -> kiro (runtime.kiro.dev) + copilot (githubcopilot.com), in-process`);
   console.log(`  copilot models are prefixed "${cfg.copilotPrefix}"`);

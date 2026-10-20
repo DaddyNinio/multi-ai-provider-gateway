@@ -1,4 +1,4 @@
-# unified-ai-gateway
+# multi-ai-provider-gateway
 
 A single **Anthropic/OpenAI-compatible** gateway that exposes the models of two
 providers behind one endpoint — with **all code original and self-contained**.
@@ -13,15 +13,15 @@ get the union of both providers' models in a single `/v1/models` list, routed to
 the right backend by model name, plus a live token/credits dashboard.
 
 ```
-                       ┌─────────────────────┐
-  Claude Code  ─────▶  │ unified-ai-gateway  │  :9000
-  (or any client)      │  /v1/models          │
-                       │  /v1/messages         │
-                       │  /v1/chat/completions │
-                       │  /dashboard /stats    │
-                       └──────┬───────┬────────┘
-             kiro model id    │       │   copilot/<id> or known copilot id
-                              ▼       ▼
+                       ┌───────────────────────────────┐
+  Claude Code  ─────▶  │  multi-ai-provider-gateway     │  :9000
+  (or any client)      │  /v1/models                    │
+                       │  /v1/messages                  │
+                       │  /v1/chat/completions          │
+                       │  /dashboard  /stats            │
+                       └──────┬───────────────┬─────────┘
+             kiro model id    │               │   copilot/<id> or known copilot id
+                              ▼               ▼
           runtime.kiro.dev (direct)   api.githubcopilot.com (direct)
           [src/providers/kiro.ts]     [src/providers/copilot.ts]
 ```
@@ -64,7 +64,7 @@ npm start
 Or run it straight from GitHub with no clone:
 
 ```bash
-npx github:DaddyNinio/unified-ai-gateway
+npx github:DaddyNinio/multi-ai-provider-gateway
 ```
 
 ### Compiled build

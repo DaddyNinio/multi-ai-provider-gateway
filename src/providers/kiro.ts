@@ -31,21 +31,21 @@ import { existsSync } from "node:fs";
  * endpoint, so the catalog is maintained statically).
  *
  * Kiro serves models from several providers, not just Anthropic. The ids below
- * are the runtime `modelId` strings — not marketing names — in Kiro's lowercase,
+ * are runtime `modelId` strings — not marketing names — in Kiro's lowercase,
  * dot-versioned convention:
  *   - Anthropic Claude (Sonnet / Haiku / Opus)
- *   - Open-weight MoE: GLM
+ *   - OpenAI GPT-5.6 tiers (Sol / Terra / Luna)
+ *   - Open-weight MoE models (GLM, DeepSeek, MiniMax, Qwen)
  *
- * Every id here is confirmed to be accepted by the live runtime. Other
- * open-weight families (deepseek-3.2, minimax-m2.1, minimax-m2.5,
- * qwen3-coder-next) and OpenAI GPT-5.6 tiers exist in the Kiro IDE/CLI but are
- * rejected by this streaming runtime endpoint for the current account/tier
- * (INVALID_MODEL_ID), so they are omitted to keep the picker free of dead
- * entries. Following the "gateway, not gatekeeper" principle, a bare/unknown id
- * sent directly is still passed through — the runtime remains the final arbiter.
+ * This is the FULL catalog. Following the gateway's "gateway, not gatekeeper"
+ * principle, we advertise every known model and let the runtime be the final
+ * arbiter: ids your tier/account can't use are simply rejected at call time
+ * with INVALID_MODEL_ID. Availability depends on your Kiro plan (free vs. paid)
+ * and region, so not every id here will work for every account.
  */
 export const KIRO_MODELS = [
   // --- Anthropic (Claude) ---
+  "claude-sonnet-4",
   "claude-sonnet-4.5",
   "claude-sonnet-4.6",
   "claude-sonnet-5",
@@ -58,8 +58,17 @@ export const KIRO_MODELS = [
   "claude-opus-5",
   "claude-opus-5.5",
 
-  // --- Open-weight MoE models (runtime-verified) ---
+  // --- OpenAI (GPT-5.6 tiers) ---
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+
+  // --- Open-weight MoE models ---
   "glm-5",
+  "deepseek-3.2",
+  "minimax-m2.5",
+  "minimax-m2.1",
+  "qwen3-coder-next",
 ] as const;
 
 export type KiroModelId = typeof KIRO_MODELS[number];

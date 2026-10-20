@@ -20,8 +20,8 @@ token &amp; credits dashboard. All code here is **original and self-contained**:
 it talks **directly** to each provider's real backend and does not run, embed,
 or depend on any third-party gateway server.
 
-- **Kiro / Amazon Q** — Claude models plus the GLM open-weight model via
-  `runtime.kiro.dev`
+- **Kiro / Amazon Q** — Claude, OpenAI GPT-5.6, and open-weight models
+  (GLM, DeepSeek, MiniMax, Qwen) via `runtime.kiro.dev`
 - **GitHub Copilot** — the full Copilot catalog via `api.githubcopilot.com`
 
 ```

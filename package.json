@@ -15,12 +15,19 @@
   "bin": {
     "unified-ai-gateway": "./dist/main.js"
   },
+  "files": [
+    "dist",
+    ".env.example",
+    "README.md"
+  ],
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/main.js",
     "serve": "node dist/main.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

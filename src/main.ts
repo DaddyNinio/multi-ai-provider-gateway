@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Entry point: load .env, build config, and start the HTTP server.
  */

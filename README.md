@@ -244,12 +244,15 @@ Open **http://localhost:9000/dashboard** for a live view (auto-refreshes every
 - **Totals** — requests, errors, input/output/total tokens, and estimated spend.
 - **Per-provider usage** — the same metrics split for Kiro vs GitHub Copilot,
   each with its own estimated spend.
-- **Credits &amp; quota** — per-provider auth state and credits usage. Copilot
-  shows its plan, token expiry, quota reset date, and per-quota usage
-  (`chat`, `completions`, `premium_interactions`) as **used / entitlement** with
-  percent remaining. Kiro is a subscription/Amazon Q plan with no per-token
-  meter, so its usage is reflected in the session stats above. A **Connect**
-  button (device-code login) appears for any provider not yet authenticated.
+- **Credits &amp; quota** — per-provider credits usage.
+  **Kiro** shows live credit usage from the same `GetUsageLimits` call the
+  kiro-cli `/usage` panel uses: plan (e.g. KIRO PRO+), credits used / monthly
+  limit with a progress bar, remaining balance, reset date, and overage
+  used / rate / estimated cost.
+  **Copilot** shows its plan, token expiry, quota reset date, and per-quota
+  usage (`chat`, `completions`, `premium_interactions`) as **used / entitlement**
+  with percent remaining. A **Connect** button (device-code login) appears for
+  any provider not yet authenticated.
 - **Per-model usage** — a table of counts, errors, tokens, and estimated spend
   per model.
 

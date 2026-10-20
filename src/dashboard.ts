@@ -158,6 +158,37 @@ function renderQuotaLines(u) {
     : '';
 }
 
+function renderKiroUsage(u) {
+  // Build a Kiro Account-style credit view: plan, used/limit, bar, reset, overage.
+  const used = u.used != null ? Math.round(u.used) : null;
+  const limit = u.limit != null ? Math.round(u.limit) : null;
+  const pct = u.percentUsed != null ? u.percentUsed : (limit ? Math.round(((used||0)/limit)*100) : 0);
+  const remaining = u.remaining != null ? Math.round(u.remaining) : (limit!=null&&used!=null? limit-used : null);
+  let html = '';
+  if (u.plan) html += '<div style="display:flex;justify-content:space-between;margin-top:8px"><span class="muted">plan</span><b>' + u.plan + '</b></div>';
+  if (limit != null) {
+    html += '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px">'
+      + '<span style="font-size:20px;font-weight:600">' + fmt(used) + '<span class="muted" style="font-size:13px"> / ' + fmt(limit) + ' credits</span></span>'
+      + '<span class="pill kiro">' + pct + '%</span></div>';
+    html += '<div style="height:6px;border-radius:999px;background:#30363d;margin:8px 0;overflow:hidden">'
+      + '<div style="height:100%;width:' + Math.min(100,pct) + '%;background:#8957e5"></div></div>';
+  }
+  const foot = [];
+  if (remaining != null) foot.push('remaining ' + fmt(remaining));
+  if (u.resetsAt) foot.push('resets ' + when(u.resetsAt));
+  if (foot.length) html += '<div class="muted" style="font-size:12px;display:flex;justify-content:space-between">' + foot.map(x=>'<span>'+x+'</span>').join('') + '</div>';
+  // Overage block
+  const oRows = [];
+  if (u.overageUsed != null) oRows.push(['overage used', fmt(Math.round(u.overageUsed)) + ' credits']);
+  if (u.overageRate != null) oRows.push(['overage rate', money(u.overageRate) + ' / credit']);
+  if (u.overageCost != null) oRows.push(['est. overage cost', money(u.overageCost)]);
+  if (oRows.length) {
+    html += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #21262d;display:grid;grid-template-columns:1fr auto;gap:4px 12px">'
+      + oRows.map(([k,v])=>'<span class="muted">'+k+'</span><span class="num">'+v+'</span>').join('') + '</div>';
+  }
+  return html;
+}
+
 function renderCredits(c) {
   const ups = (c && c.providers) || {};
   $('credits').innerHTML = PROVIDERS.map(p => {
@@ -165,9 +196,12 @@ function renderCredits(c) {
     const authed = u.available !== false;
     let body;
     if (authed) {
-      body = '<span class="pill ' + p.cls + '">authenticated</span>' + renderQuotaLines(u);
-      if (p.key === 'kiro-gateway' && u.metered === false) {
-        body += '<div class="auth-info muted">' + (u.detail || 'subscription — no per-token meter') + '</div>';
+      body = '<span class="pill ' + p.cls + '">authenticated</span>';
+      if (p.key === 'kiro-gateway') {
+        if (u.metered && u.limit != null) body += renderKiroUsage(u);
+        else body += '<div class="auth-info muted">signed in — credit usage unavailable</div>';
+      } else {
+        body += renderQuotaLines(u);
       }
     } else {
       body = '<div class="muted" style="margin-bottom:8px">not authenticated</div>'

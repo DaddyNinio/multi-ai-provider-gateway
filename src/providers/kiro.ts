@@ -486,6 +486,101 @@ export function listModels(): Array<{ id: string }> {
   return KIRO_MODELS.map(id => ({ id }));
 }
 
+/** Kiro credit usage, matching the "Kiro Account" panel in the Kiro app. */
+export interface KiroUsage {
+  available: boolean;
+  /** e.g. "KIRO PRO+" */
+  plan?: string;
+  /** Credits used this cycle (with precision, e.g. 261.45). */
+  used?: number;
+  /** Monthly credit allowance (e.g. 2000). */
+  limit?: number;
+  /** Remaining credits (limit - used). */
+  remaining?: number;
+  /** Percent of the allowance used (0-100, rounded). */
+  percentUsed?: number;
+  /** Reset date (ISO string). */
+  resetsAt?: string;
+  /** Overage credits used this cycle. */
+  overageUsed?: number;
+  /** Price per overage credit (USD). */
+  overageRate?: number;
+  /** Estimated overage cost (USD). */
+  overageCost?: number;
+  /** Currency code (e.g. "USD"). */
+  currency?: string;
+}
+
+/**
+ * Fetch live Kiro credit usage via the CodeWhisperer `GetUsageLimits` operation
+ * (the same call the kiro-cli `/usage` panel uses). Returns credits used/limit,
+ * plan, reset date and overage — mirroring the Kiro Account panel.
+ *
+ * Non-fatal: returns { available: false } if not signed in or the call fails.
+ */
+export async function getKiroUsage(options: KiroChatOptions = {}): Promise<KiroUsage> {
+  let credentials: KiroCredentials;
+  try {
+    credentials = getKiroCredentials();
+  } catch {
+    return { available: false };
+  }
+
+  try {
+    // GetUsageLimits lives on the Amazon Q (CodeWhisperer) control-plane host,
+    // not the runtime.*.kiro.dev streaming host.
+    const res = await fetch("https://q.us-east-1.amazonaws.com/", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${credentials.accessToken}`,
+        "Content-Type": "application/x-amz-json-1.0",
+        "x-amz-target": "AmazonCodeWhispererService.GetUsageLimits",
+        "User-Agent": "aws-sdk-js/1.0 multi-ai-provider-gateway",
+      },
+      body: JSON.stringify({ profileArn: credentials.profileArn }),
+      signal: options.signal,
+    });
+    if (!res.ok) return { available: false };
+
+    const data = (await res.json()) as any;
+    const sub = data.subscriptionInfo ?? {};
+    // Prefer the CREDIT breakdown; otherwise take the first entry.
+    const list: any[] = Array.isArray(data.usageBreakdownList) ? data.usageBreakdownList : [];
+    const credit = list.find((b) => b.resourceType === "CREDIT") ?? list[0] ?? {};
+
+    const used = num(credit.currentUsageWithPrecision ?? credit.currentUsage);
+    const limit = num(credit.usageLimitWithPrecision ?? credit.usageLimit);
+    const overageUsed = num(credit.currentOveragesWithPrecision ?? credit.currentOverages);
+    const overageRate = num(credit.overageRate);
+    const resetEpoch = num(credit.nextDateReset ?? data.nextDateReset);
+
+    const usage: KiroUsage = {
+      available: true,
+      plan: sub.subscriptionTitle,
+      used,
+      limit,
+      currency: credit.currency,
+      overageUsed,
+      overageRate,
+      overageCost: num(credit.overageCharges) || (overageUsed && overageRate ? overageUsed * overageRate : 0),
+    };
+    if (limit != null && used != null) {
+      usage.remaining = Math.max(0, limit - used);
+      usage.percentUsed = limit > 0 ? Math.round((used / limit) * 100) : undefined;
+    }
+    if (resetEpoch) usage.resetsAt = new Date(resetEpoch * 1000).toISOString();
+    return usage;
+  } catch {
+    return { available: false };
+  }
+}
+
+/** Coerce a value to a finite number, or undefined. */
+function num(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 /**
  * Send a chat request to the Kiro runtime.
  * 
@@ -746,6 +841,7 @@ export default {
   listModels,
   chat,
   getKiroCredentials,
+  getKiroUsage,
   getKiroBaseUrl,
   KIRO_MODELS,
 };

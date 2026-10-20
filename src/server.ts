@@ -92,17 +92,35 @@ async function getCredits(): Promise<Record<string, unknown>> {
     providers["copilot-api"] = { available: false };
   }
 
-  // Kiro: report authentication state. The Amazon Q runtime does not expose a
-  // per-token credit meter, so usage is tracked via this gateway's session
-  // stats (see /stats) rather than a provider-reported balance.
+  // Kiro: fetch live credit usage (plan, used/limit, reset, overage) via the
+  // same GetUsageLimits call the kiro-cli /usage panel uses.
   try {
-    kiro.getKiroCredentials();
-    providers["kiro-gateway"] = {
-      available: true,
-      note: "authenticated",
-      metered: false,
-      detail: "subscription / Amazon Q plan — no per-token meter; see session usage",
-    };
+    const usage = await kiro.getKiroUsage();
+    if (usage.available) {
+      providers["kiro-gateway"] = {
+        available: true,
+        note: "authenticated",
+        metered: true,
+        plan: usage.plan,
+        used: usage.used,
+        limit: usage.limit,
+        remaining: usage.remaining,
+        percentUsed: usage.percentUsed,
+        resetsAt: usage.resetsAt,
+        overageUsed: usage.overageUsed,
+        overageRate: usage.overageRate,
+        overageCost: usage.overageCost,
+        currency: usage.currency,
+      };
+    } else {
+      // Signed in but usage unavailable, or not signed in.
+      try {
+        kiro.getKiroCredentials();
+        providers["kiro-gateway"] = { available: true, note: "authenticated", metered: false };
+      } catch {
+        providers["kiro-gateway"] = { available: false };
+      }
+    }
   } catch {
     providers["kiro-gateway"] = { available: false };
   }

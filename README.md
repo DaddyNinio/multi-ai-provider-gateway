@@ -59,6 +59,7 @@ authenticated.
 npm install
 npm start
 # open http://localhost:9000/dashboard
+# on first run it offers to configure Claude Code for you
 ```
 
 Or run it straight from GitHub with no clone:
@@ -116,12 +117,51 @@ which providers are authenticated. Stats are in-memory and reset on restart.
 
 ## Use with Claude Code
 
+The easiest way is to let the gateway configure Claude Code for you. It writes
+`ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, and
+`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` into `~/.claude/settings.json`,
+**merging** with your existing settings and saving a timestamped backup first.
+
+```bash
+# One-shot: configure Claude Code, then exit
+npm run setup-claude
+# or
+multi-ai-provider-gateway --setup-claude
+```
+
+When you simply start the server it also **offers to configure Claude Code**
+interactively the first time:
+
+```bash
+npm start
+# ◆ multi-ai-provider-gateway  http://localhost:9000
+# Configure Claude Code to use this gateway now? [Y/n]
+```
+
+After that, just run Claude Code and pick any model from both providers:
+
+```bash
+claude
+# then type: /models
+```
+
+Prefer to set it yourself? Point Claude Code at the gateway manually:
+
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:9000 ANTHROPIC_AUTH_TOKEN=any-value claude
 ```
 
-Then run `/models` inside Claude Code to switch between every model from both
-providers.
+### CLI options
+
+| Flag                 | Description                                                       |
+| -------------------- | ---------------------------------------------------------------- |
+| `--setup-claude`     | Configure Claude Code to use this gateway, then exit.            |
+| `--port, -p <n>`     | Port to listen on (default `9000`, or `$PORT`).                  |
+| `--token <value>`    | Auth token to write during setup (default: random, URL-safe).    |
+| `--no-setup-prompt`  | Skip the interactive "configure Claude Code?" prompt.            |
+| `--yes, -y`          | Assume "yes" to prompts (non-interactive setup).                 |
+| `--help, -h`         | Show help.                                                       |
+
 
 ## Credits
 

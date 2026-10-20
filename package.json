@@ -23,6 +23,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "setup-claude": "tsx src/main.ts --setup-claude",
     "build": "tsc && chmod +x dist/main.js",
     "serve": "node dist/main.js",
     "typecheck": "tsc --noEmit",

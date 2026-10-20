@@ -1,144 +1,134 @@
 # unified-ai-gateway
 
-A single **Anthropic/OpenAI-compatible** gateway that merges the model catalogs of
-two upstreams behind one endpoint:
+A single **Anthropic/OpenAI-compatible** gateway that exposes the models of two
+providers behind one endpoint — with **all code original and self-contained**.
+It talks **directly** to each provider's real backend; it does not run, embed,
+or depend on any third-party gateway server.
 
-- [**kiro-gateway**](https://github.com/jwadow/kiro-gateway) — Claude models via Kiro / Amazon Q
-- [**copilot-api**](https://github.com/caozhiyuan/copilot-api) — GitHub Copilot, Codex and third-party models
+- **Kiro / Amazon Q** — Claude and GLM models via `runtime.kiro.dev`
+- **GitHub Copilot** — the full Copilot model catalog via `api.githubcopilot.com`
 
-Point Claude Code (or any Anthropic/OpenAI client) at this one server and you get
-the union of both providers' models in a single `/v1/models` list, with requests
-automatically routed to whichever backend owns the chosen model.
+Point Claude Code (or any Anthropic/OpenAI client) at this one server and you
+get the union of both providers' models in a single `/v1/models` list, routed to
+the right backend by model name, plus a live token/credits dashboard.
 
 ```
                        ┌─────────────────────┐
   Claude Code  ─────▶  │ unified-ai-gateway  │  :9000
-  (or any client)      │   /v1/models        │
-                       │   /v1/messages       │
-                       │   /v1/chat/...       │
-                       └────────┬─────┬───────┘
-                        model=  │     │  =copilot/<id> or known copilot id
-                        kiro id │     │
-                                ▼     ▼
-                   kiro-gateway:8000  copilot-api:4141
+  (or any client)      │  /v1/models          │
+                       │  /v1/messages         │
+                       │  /v1/chat/completions │
+                       │  /dashboard /stats    │
+                       └──────┬───────┬────────┘
+             kiro model id    │       │   copilot/<id> or known copilot id
+                              ▼       ▼
+          runtime.kiro.dev (direct)   api.githubcopilot.com (direct)
+          [src/providers/kiro.ts]     [src/providers/copilot.ts]
 ```
 
-## Why
+## How it is self-contained
 
-`kiro-gateway` and `copilot-api` are both Anthropic-compatible, but they are
-separate servers on separate ports with separate model lists. Switching between
-them means reconfiguring your client each time. This gateway federates them:
+Everything runs from this one repo. The two providers are implemented here as
+original TypeScript modules:
 
-- **One endpoint** for every model from both providers.
-- **No collisions** — copilot models are namespaced with a configurable prefix
-  (`copilot/` by default), so `copilot/claude-sonnet-5` and the kiro
-  `claude-sonnet-5` can coexist.
-- **Transparent routing** — the `model` field in each request decides the backend.
-- **Graceful degradation** — if one upstream is down, the other's models are
-  still listed and usable.
+- **`src/providers/copilot.ts`** — reads your GitHub OAuth token, exchanges it
+  for a Copilot token (cached + auto-refreshed), lists Copilot models, and calls
+  Copilot's OpenAI-compatible chat API directly.
+- **`src/providers/kiro.ts`** — reads your Kiro credentials from the kiro-cli
+  database, calls the Amazon CodeWhisperer streaming runtime
+  (`generateAssistantResponse`), and decodes its AWS event-stream response into
+  clean Anthropic output.
+
+No external gateway process is started or required. These modules were written
+from scratch (inspired by how `jwadow/kiro-gateway` and `caozhiyuan/copilot-api`
+work, but containing none of their code).
 
 ## Requirements
 
-- Node.js >= 20
-- A running `kiro-gateway` (default `http://localhost:8000`) and/or
-  `copilot-api` (default `http://localhost:4141`). You can run just one; the
-  gateway serves whatever is reachable.
+- Node.js >= 20, and the `sqlite3` CLI (ships with macOS).
+- **GitHub Copilot** auth: a token at `~/.local/share/copilot-api/github_token`
+  (or set `GITHUB_TOKEN`).
+- **Kiro** auth: logged in via `kiro login` (creates the kiro-cli database).
 
-## Setup
+You can run with just one provider configured; the gateway serves whatever is
+authenticated.
+
+## Quick start
 
 ```bash
 npm install
-cp .env.example .env   # edit if your ports/keys differ
-npm run start          # dev run via tsx
-# or:
-npm run build && npm run serve   # compiled JS
+npm start
+# open http://localhost:9000/dashboard
+```
+
+Or run it straight from GitHub with no clone:
+
+```bash
+npx github:DaddyNinio/unified-ai-gateway
+```
+
+### Compiled build
+
+```bash
+npm run build && npm run serve
 ```
 
 ## Configuration
 
-All configuration is via environment variables (or a `.env` file). Defaults:
+All optional — defaults work out of the box. See `.env.example`.
 
-| Variable             | Default                  | Description                                            |
-| -------------------- | ------------------------ | ------------------------------------------------------ |
-| `PORT`               | `9000`                   | Port this gateway listens on.                          |
-| `KIRO_GATEWAY_URL`   | `http://localhost:8000`  | Base URL of kiro-gateway.                              |
-| `KIRO_GATEWAY_KEY`   | *(empty)*                | Bearer key for kiro-gateway, if it requires one.       |
-| `COPILOT_API_URL`    | `http://localhost:4141`  | Base URL of copilot-api.                               |
-| `COPILOT_API_KEY`    | *(empty)*                | Bearer key for copilot-api, if it requires one.        |
-| `COPILOT_PREFIX`     | `copilot/`               | Namespace applied to copilot model ids.                |
-| `REQUEST_TIMEOUT_MS` | `600000`                 | Per-request upstream timeout (ms).                     |
+| Variable             | Default      | Description                                  |
+| -------------------- | ------------ | -------------------------------------------- |
+| `PORT`               | `9000`       | Port this gateway listens on.                |
+| `COPILOT_PREFIX`     | `copilot/`   | Namespace applied to Copilot model ids.      |
+| `REQUEST_TIMEOUT_MS` | `600000`     | Per-request timeout (ms).                    |
+| `GITHUB_TOKEN`       | *(file)*     | Override the GitHub OAuth token.             |
 
 ## Endpoints
 
 | Method | Path                   | Description                                                      |
 | ------ | ---------------------- | ---------------------------------------------------------------- |
-| `GET`  | `/health`              | Reports reachability of both upstreams.                          |
-| `GET`  | `/v1/models`           | Merged catalog. Kiro ids as-is; copilot ids prefixed.            |
-| `POST` | `/v1/messages`         | Anthropic Messages API. Routed by `model`. Streaming supported.  |
-| `POST` | `/v1/chat/completions` | OpenAI Chat Completions API. Routed by `model`. Streaming too.   |
-| `GET`  | `/dashboard`           | Live credits &amp; token-usage monitoring page (HTML). Also at `/`. |
-| `GET`  | `/stats`               | JSON token-usage stats accumulated by this gateway.              |
-| `GET`  | `/credits`             | Best-effort credit/quota info pulled from the upstreams.         |
-
-### Monitoring
-
-Open [http://localhost:9000/dashboard](http://localhost:9000/dashboard) in a
-browser for a live view (auto-refreshes every 4s) of:
-
-- total and per-model request counts, errors, and input/output token totals,
-  tracked in-memory by this gateway for the current session;
-- credit/quota info from upstreams that expose it (e.g. copilot-api's `/usage`).
-
-Stats reset when the gateway restarts — it is a live monitor, not a persistent
-ledger.
+| `GET`  | `/health`              | Reports which providers are authenticated.                       |
+| `GET`  | `/v1/models`           | Merged catalog. Kiro ids as-is; Copilot ids prefixed.            |
+| `POST` | `/v1/messages`         | Anthropic Messages API. Routed by `model`.                       |
+| `POST` | `/v1/chat/completions` | OpenAI Chat Completions API. Routed by `model`.                  |
+| `GET`  | `/dashboard`           | Live credits &amp; token-usage monitor (HTML). Also at `/`.      |
+| `GET`  | `/stats`               | JSON token-usage stats for the current session.                  |
+| `GET`  | `/credits`             | Which providers are authenticated.                               |
 
 ### Routing rules
 
 For a request's `model`:
 
-1. starts with `COPILOT_PREFIX` (e.g. `copilot/gpt-5`) → **copilot-api** (prefix stripped)
-2. a bare id that exists only in the copilot catalog → **copilot-api**
-3. everything else → **kiro-gateway**
+1. starts with `COPILOT_PREFIX` (e.g. `copilot/gpt-4o`) → **Copilot** (prefix stripped)
+2. a bare id that exists only in the Copilot catalog → **Copilot**
+3. everything else → **Kiro**
 
-`/v1/models` must be hit at least once for rule 2 to know the copilot catalog;
-rule 1 (the explicit prefix) always works regardless.
+Cross-protocol calls are translated automatically (Anthropic↔OpenAI), so a
+Copilot model works through `/v1/messages` and a Kiro model works through
+`/v1/chat/completions`.
 
-## Examples
+## Monitoring
 
-List every model from both providers:
-
-```bash
-curl -s http://localhost:9000/v1/models | jq -r '.data[] | "\(.owned_by)\t\(.id)"'
-```
-
-Call a kiro model:
-
-```bash
-curl -s http://localhost:9000/v1/messages \
-  -H 'content-type: application/json' -H 'anthropic-version: 2023-06-01' \
-  -d '{"model":"claude-sonnet-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
-```
-
-Call a copilot model (explicit prefix):
-
-```bash
-curl -s http://localhost:9000/v1/messages \
-  -H 'content-type: application/json' -H 'anthropic-version: 2023-06-01' \
-  -d '{"model":"copilot/claude-sonnet-5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
-```
+Open **http://localhost:9000/dashboard** for a live view (auto-refreshes every
+4s) of per-model request counts, errors, and input/output token totals, plus
+which providers are authenticated. Stats are in-memory and reset on restart.
 
 ## Use with Claude Code
 
-Point Claude Code at this gateway and the `/models` picker shows every model from
-both providers:
-
 ```bash
-ANTHROPIC_BASE_URL=http://localhost:9000 \
-ANTHROPIC_AUTH_TOKEN=any-value \
-claude
+ANTHROPIC_BASE_URL=http://localhost:9000 ANTHROPIC_AUTH_TOKEN=any-value claude
 ```
 
-Then run `/models` inside Claude Code to switch between them live.
+Then run `/models` inside Claude Code to switch between every model from both
+providers.
+
+## Credits
+
+Original work, inspired by the designs of
+[jwadow/kiro-gateway](https://github.com/jwadow/kiro-gateway) (AGPL-3.0) and
+[caozhiyuan/copilot-api](https://github.com/caozhiyuan/copilot-api) (MIT). No
+code from either project is included here.
 
 ## License
 

@@ -34,10 +34,11 @@ function loadDotEnv(path = ".env"): void {
 
 loadDotEnv();
 const cfg = loadConfig();
-const app = createApp(cfg);
 
+const app = createApp(cfg);
 serve({ fetch: app.fetch, port: cfg.port }, (info) => {
   console.log(`unified-ai-gateway listening on http://localhost:${info.port}`);
-  console.log(`  kiro-gateway -> ${cfg.kiro.url}`);
-  console.log(`  copilot-api  -> ${cfg.copilot.url}  (models prefixed "${cfg.copilotPrefix}")`);
+  console.log(`  dashboard -> http://localhost:${info.port}/dashboard`);
+  console.log(`  providers -> kiro (runtime.kiro.dev) + copilot (githubcopilot.com), in-process`);
+  console.log(`  copilot models are prefixed "${cfg.copilotPrefix}"`);
 });

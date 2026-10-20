@@ -71,7 +71,7 @@ async function tick() {
   try {
     const [s, c] = await Promise.all([
       fetch('/stats').then(r=>r.json()),
-      fetch('/credits').then(r=>r.json()).catch(()=>({upstreams:{}})),
+      fetch('/credits').then(r=>r.json()).catch(()=>({providers:{}})),
     ]);
     const t = s.totals;
     t_req.textContent = fmt(t.requests);
@@ -93,7 +93,7 @@ async function tick() {
         <td class="muted">\${ago(m.lastUsed)}</td>
       </tr>\`).join('') : '<tr><td colspan="8" class="muted">no requests yet</td></tr>';
 
-    const ups = c.upstreams || {};
+    const ups = c.providers || {};
     const keys = Object.keys(ups);
     credits.innerHTML = keys.length ? keys.map(k => {
       const u = ups[k];

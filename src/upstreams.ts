@@ -1,93 +1,88 @@
 /**
- * Upstream model aggregation and request routing.
+ * Model aggregation and routing across the two in-process providers:
+ *   - kiro     (src/providers/kiro.ts)     — Claude/GLM via the Kiro runtime
+ *   - copilot  (src/providers/copilot.ts)  — GitHub Copilot catalog
  */
-import { authHeader, type Config, type UpstreamConfig } from "./config.js";
+import type { Config } from "./config.js";
+import * as copilot from "./providers/copilot.js";
+import * as kiro from "./providers/kiro.js";
 
 export interface ModelEntry {
   id: string;
-  object?: string;
-  owned_by?: string;
+  object: string;
+  owned_by: string;
   [k: string]: unknown;
 }
 
-/** Which copilot model ids exist upstream (plain ids, no prefix). */
+export type Backend = "kiro-gateway" | "copilot-api";
+
+/** Plain copilot model ids (without prefix), learned from the last listing. */
 const copilotModelIds = new Set<string>();
 
-async function fetchModels(up: UpstreamConfig): Promise<ModelEntry[]> {
-  try {
-    const res = await fetch(`${up.url}/v1/models`, {
-      headers: authHeader(up.key),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!res.ok) return [];
-    const json = (await res.json()) as { data?: ModelEntry[] };
-    return Array.isArray(json.data) ? json.data : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Build the merged /v1/models catalog. Kiro models keep their ids; copilot
- * models are namespaced with the configured prefix so the two never collide.
- */
+/** Build the merged /v1/models catalog from both providers. */
 export async function getMergedModels(cfg: Config): Promise<ModelEntry[]> {
-  const [kiro, copilot] = await Promise.all([
-    fetchModels(cfg.kiro),
-    fetchModels(cfg.copilot),
-  ]);
-
   const merged: ModelEntry[] = [];
 
-  for (const m of kiro) {
-    if (!m.id) continue;
-    merged.push({ ...m, owned_by: cfg.kiro.name });
+  // Kiro models (static list) — ids as-is.
+  for (const m of kiro.listModels()) {
+    merged.push({ id: m.id, object: "model", owned_by: "kiro-gateway" });
   }
 
-  copilotModelIds.clear();
-  for (const m of copilot) {
-    if (!m.id) continue;
-    copilotModelIds.add(m.id);
-    merged.push({ ...m, id: `${cfg.copilotPrefix}${m.id}`, owned_by: cfg.copilot.name });
+  // Copilot models (live) — namespaced with the prefix. Failures are tolerated
+  // so the gateway still serves kiro if Copilot auth is unavailable.
+  try {
+    const cModels = await copilot.listModels();
+    copilotModelIds.clear();
+    for (const m of cModels) {
+      if (!m.id) continue;
+      copilotModelIds.add(m.id);
+      merged.push({ id: `${cfg.copilotPrefix}${m.id}`, object: "model", owned_by: "copilot-api" });
+    }
+  } catch {
+    // Copilot unavailable — serve kiro-only.
   }
 
   return merged;
 }
 
 export interface Route {
-  upstream: UpstreamConfig;
-  /** Model id to forward to the upstream (prefix stripped). */
-  forwardModel: string;
+  backend: Backend;
+  /** The model id to pass to the provider (prefix stripped for copilot). */
+  model: string;
 }
 
 /**
- * Pick the upstream for a requested model id.
- * - "copilot/<id>"            -> copilot-api (prefix stripped)
- * - a known copilot plain id  -> copilot-api
- * - anything else             -> kiro-gateway
+ * Decide which provider handles a requested model id.
+ * - "copilot/<id>"            -> copilot (prefix stripped)
+ * - a known copilot plain id  -> copilot
+ * - everything else           -> kiro
  */
 export function pickRoute(cfg: Config, model: string): Route {
   if (model.startsWith(cfg.copilotPrefix)) {
-    return { upstream: cfg.copilot, forwardModel: model.slice(cfg.copilotPrefix.length) };
+    return { backend: "copilot-api", model: model.slice(cfg.copilotPrefix.length) };
   }
   if (copilotModelIds.has(model)) {
-    return { upstream: cfg.copilot, forwardModel: model };
+    return { backend: "copilot-api", model };
   }
-  return { upstream: cfg.kiro, forwardModel: model };
+  return { backend: "kiro-gateway", model };
 }
 
-/** Lightweight reachability probe for /health. */
-export async function probe(up: UpstreamConfig): Promise<boolean> {
-  for (const path of ["/health", "/v1/models"]) {
+/** Probe each provider's basic availability for /health. */
+export async function health(cfg: Config): Promise<{ kiro: boolean; copilot: boolean }> {
+  const kiroOk = (() => {
     try {
-      const res = await fetch(`${up.url}${path}`, {
-        headers: authHeader(up.key),
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (res.status < 500) return true;
+      kiro.getKiroCredentials();
+      return true;
     } catch {
-      // try next path
+      return false;
     }
+  })();
+  let copilotOk = false;
+  try {
+    await copilot.getCopilotToken();
+    copilotOk = true;
+  } catch {
+    copilotOk = false;
   }
-  return false;
+  return { kiro: kiroOk, copilot: copilotOk };
 }

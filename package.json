@@ -1,0 +1,37 @@
+{
+  "name": "unified-ai-gateway",
+  "version": "1.0.0",
+  "description": "A single Anthropic/OpenAI-compatible gateway that merges the model catalogs of kiro-gateway and copilot-api behind one endpoint.",
+  "keywords": [
+    "ai-gateway",
+    "anthropic-compatible",
+    "openai-compatible",
+    "kiro",
+    "github-copilot",
+    "claude-code"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "unified-ai-gateway": "./dist/main.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "build": "tsc",
+    "serve": "node dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

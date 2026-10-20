@@ -26,8 +26,22 @@ import { existsSync } from "node:fs";
 // Types
 // ============================================================================
 
-/** Known Kiro model identifiers (runtime.kiro.dev has no ListAvailableModels endpoint). */
+/**
+ * Known Kiro model identifiers (runtime.kiro.dev has no ListAvailableModels
+ * endpoint, so the catalog is maintained statically).
+ *
+ * Kiro serves models from several providers, not just Anthropic:
+ *   - Anthropic Claude (Sonnet / Haiku / Opus / Fable)
+ *   - OpenAI GPT-5.6 tiers (Sol / Terra / Luna)
+ *   - Open-weight MoE models (GLM, DeepSeek, MiniMax, Qwen)
+ *
+ * Model availability depends on your Kiro tier (free vs. paid). Ids that your
+ * account can't access will simply be rejected by the runtime at call time;
+ * listing them here is harmless. Ids follow Kiro's own lowercase,
+ * dot-versioned naming convention.
+ */
 export const KIRO_MODELS = [
+  // --- Anthropic (Claude) ---
   "claude-sonnet-4.5",
   "claude-sonnet-4.6",
   "claude-sonnet-5",
@@ -39,7 +53,19 @@ export const KIRO_MODELS = [
   "claude-opus-4.8",
   "claude-opus-5",
   "claude-opus-5.5",
+  "claude-fable-5.1",
+
+  // --- OpenAI (GPT-5.6 tiers) ---
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
+
+  // --- Open-weight MoE models ---
   "glm-5",
+  "deepseek-v3.2",
+  "minimax-m2.5",
+  "minimax-m2.1",
+  "qwen3-coder-next",
 ] as const;
 
 export type KiroModelId = typeof KIRO_MODELS[number];
